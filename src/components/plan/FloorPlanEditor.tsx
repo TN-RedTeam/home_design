@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useStore } from '../../store/useStore';
+import { resolveActiveFloor, useStore } from '../../store/useStore';
 import type { Opening, PlacedFurniture, Room, Vec2 } from '../../types';
 import { FLOOR_COLORS, formatArea, formatLength } from '../../types';
 import {
@@ -70,6 +70,19 @@ export default function FloorPlanEditor() {
   const removeOpening = useStore((s) => s.removeOpening);
   const updateRoofWindow = useStore((s) => s.updateRoofWindow);
   const removeRoofWindow = useStore((s) => s.removeRoofWindow);
+  const activeFloorId = useStore((s) => s.activeFloorId);
+  const setActiveFloor = useStore((s) => s.setActiveFloor);
+  const addFloor = useStore((s) => s.addFloor);
+
+  const activeFloor = resolveActiveFloor(project, activeFloorId);
+  const floorsSorted = [...project.floors].sort((a, b) => a.level - b.level);
+  const floorBelow = floorsSorted.find((f) => f.level === activeFloor.level - 1);
+  const floorRooms = project.rooms.filter((r) => r.floorId === activeFloor.id);
+  const floorFurniture = project.furniture.filter((f) => f.floorId === activeFloor.id);
+  /** Escaliers du niveau inférieur : leur trémie d'arrivée est affichée sur ce niveau. */
+  const stairsBelow = floorBelow
+    ? project.furniture.filter((f) => f.floorId === floorBelow.id && f.shape.startsWith('stairs_'))
+    : [];
 
   const svgRef = useRef<SVGSVGElement>(null);
   const [view, setView] = useState<View>({ x: -1, y: -1, scale: 70 });
@@ -681,8 +694,42 @@ export default function FloorPlanEditor() {
       >
         <g className="grid">{gridLines}</g>
 
-        {project.rooms.map(renderRoom)}
-        {project.furniture.map(renderFurniture)}
+        {/* Contours fantômes du niveau inférieur (repère d'alignement) */}
+        {floorBelow &&
+          project.rooms
+            .filter((r) => r.floorId === floorBelow.id)
+            .map((r) => (
+              <polygon
+                key={`ghost-${r.id}`}
+                points={r.points.map((p) => `${X(p.x)},${Y(p.y)}`).join(' ')}
+                className="ghost-room"
+                pointerEvents="none"
+              />
+            ))}
+        {/* Trémies d'arrivée des escaliers du niveau inférieur */}
+        {stairsBelow.map((st) => {
+          const cx = X(st.x);
+          const cy = Y(st.y);
+          return (
+            <g key={`tremie-${st.id}`} transform={`rotate(${st.rotation} ${cx} ${cy})`} pointerEvents="none">
+              <rect
+                x={cx - px(st.width) / 2}
+                y={cy - px(st.depth) / 2}
+                width={px(st.width)}
+                height={px(st.depth)}
+                className="stair-hopper"
+              />
+              {s > 30 && (
+                <text x={cx} y={cy} className="stair-hopper-label" textAnchor="middle" dominantBaseline="middle">
+                  Trémie escalier ({floorBelow?.name})
+                </text>
+              )}
+            </g>
+          );
+        })}
+
+        {floorRooms.map(renderRoom)}
+        {floorFurniture.map(renderFurniture)}
 
         {drag?.mode === 'draw' && (
           <g className="draw-preview">
@@ -724,6 +771,21 @@ export default function FloorPlanEditor() {
           </g>
         )}
       </svg>
+      <div className="floor-switcher">
+        {floorsSorted.map((f) => (
+          <button
+            key={f.id}
+            className={f.id === activeFloor.id ? 'active' : ''}
+            onClick={() => setActiveFloor(f.id)}
+            title={`Niveau ${f.level}`}
+          >
+            {f.name}
+          </button>
+        ))}
+        <button className="add-floor" onClick={addFloor} title="Ajouter un étage">
+          +
+        </button>
+      </div>
       <div className="plan-hints">
         {tool === 'addRoom'
           ? 'Cliquez-glissez pour dessiner une pièce rectangulaire'

@@ -180,6 +180,62 @@
   stroke-width: 3px;
 }
 
+.ghost-room {
+  fill: none;
+  stroke: #4a5060;
+  stroke-width: 1.5;
+  stroke-dasharray: 4 4;
+  opacity: 0.55;
+}
+
+.stair-hopper {
+  fill: rgba(212, 163, 115, 0.1);
+  stroke: #d4a373;
+  stroke-width: 1.5;
+  stroke-dasharray: 8 5;
+  opacity: 0.8;
+}
+.stair-hopper-label {
+  fill: #d4a373;
+  font-size: 10px;
+  font-weight: 600;
+  opacity: 0.9;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.5);
+  stroke-width: 2.5px;
+}
+
+.floor-switcher {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  background: rgba(28, 30, 34, 0.9);
+  border: 1px solid #33363e;
+  border-radius: 10px;
+  padding: 4px;
+}
+.floor-switcher button {
+  background: transparent;
+  border: none;
+  color: #9aa1b0;
+  padding: 5px 12px;
+  border-radius: 7px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.floor-switcher button.active {
+  background: #d4a373;
+  color: #1c1e22;
+  font-weight: 600;
+}
+.floor-switcher button:hover:not(.active) { background: #2e313a; color: #e8e6e1; }
+.floor-switcher .add-floor { font-weight: 700; font-size: 14px; }
+.view3d-switcher { z-index: 10; }
+
 .plan-hints {
   position: absolute;
   bottom: 12px;

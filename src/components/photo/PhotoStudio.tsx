@@ -4,6 +4,7 @@ import type { ID, PhotoOverlay, PhotoPaintStroke, RoomPhoto, Vec2 } from '../../
 import { uid } from '../../types';
 import { PAINT_PALETTES } from '../../data/palettes';
 import { drawImageInQuad, pointInQuad } from '../../utils/homography';
+import { removeBackground } from '../../utils/cutout';
 import './photoStudio.css';
 
 /** Largeur maximale (px) des photos stockées, pour limiter le poids localStorage. */
@@ -120,6 +121,13 @@ export default function PhotoStudio() {
   const [importError, setImportError] = useState('');
   const [selectedOverlayId, setSelectedOverlayId] = useState<ID | null>(null);
   const [showAddPanel, setShowAddPanel] = useState(false);
+  const [autoCutout, setAutoCutout] = useState(true);
+  const [addCutoutError, setAddCutoutError] = useState('');
+  /** Images d'origine (avant détourage) des objets détourés durant cette session, pour permettre l'annulation. */
+  const [cutoutOriginals, setCutoutOriginals] = useState<Map<ID, string>>(new Map());
+  const [cutoutBusyId, setCutoutBusyId] = useState<ID | null>(null);
+  const [cutoutError, setCutoutError] = useState('');
+  const cutoutErrorTimerRef = useRef<number | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const objectFileInputRef = useRef<HTMLInputElement>(null);
@@ -334,11 +342,22 @@ export default function PhotoStudio() {
     }
   }, [activePhotoId, photos, setActivePhoto]);
 
-  // Réinitialise la sélection d'objet en changeant de photo.
+  // Réinitialise la sélection d'objet et l'état de détourage en changeant de photo.
   useEffect(() => {
     setSelectedOverlayId(null);
     setShowAddPanel(false);
+    setCutoutOriginals(new Map());
+    setCutoutBusyId(null);
+    setCutoutError('');
+    setAddCutoutError('');
   }, [activePhotoId]);
+
+  // Nettoie le minuteur d'effacement du message d'erreur de détourage au démontage.
+  useEffect(() => {
+    return () => {
+      if (cutoutErrorTimerRef.current !== null) window.clearTimeout(cutoutErrorTimerRef.current);
+    };
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -596,20 +615,81 @@ export default function PhotoStudio() {
     probe.src = imageUrl;
   };
 
+  /** Ajoute un objet en tentant d'abord le détourage automatique si la case est cochée (échec non bloquant). */
+  const addObjectOverlayWithCutout = (imageUrl: string, name: string) => {
+    setAddCutoutError('');
+    if (!autoCutout) {
+      addObjectOverlay(imageUrl, name);
+      return;
+    }
+    removeBackground(imageUrl)
+      .then((cutUrl) => addObjectOverlay(cutUrl, name))
+      .catch((err: unknown) => {
+        setAddCutoutError(err instanceof Error ? err.message : 'Détourage impossible.');
+        addObjectOverlay(imageUrl, name);
+      });
+  };
+
   const handleObjectFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     e.target.value = '';
     if (!file) return;
     setImportError('');
     readAndResizeImage(file, MAX_OBJECT_WIDTH)
-      .then((dataUrl) => addObjectOverlay(dataUrl, file.name.replace(/\.[^.]+$/, '') || 'Objet'))
+      .then((dataUrl) => addObjectOverlayWithCutout(dataUrl, file.name.replace(/\.[^.]+$/, '') || 'Objet'))
       .catch(() => setImportError("Impossible de lire cette image. Essayez un autre fichier (JPG ou PNG)."));
   };
 
   const updateOverlay = (id: ID, patch: Partial<PhotoOverlay>) => {
-    if (!activePhoto) return;
-    const next = overlays.map((o) => (o.id === id ? { ...o, ...patch } : o));
-    updatePhoto(activePhoto.id, { overlays: next });
+    // Repart des overlays les plus récents (via la ref) : nécessaire car cette fonction
+    // peut être appelée après un traitement asynchrone (détourage) dont la durée peut
+    // dépasser un cycle de rendu.
+    const photo = activePhotoRef.current;
+    if (!photo) return;
+    const current = photo.overlays ?? [];
+    const next = current.map((o) => (o.id === id ? { ...o, ...patch } : o));
+    updatePhoto(photo.id, { overlays: next });
+  };
+
+  /** Affiche un message d'erreur de détourage sous la liste des objets, effacé après 6 s. */
+  const showCutoutError = useCallback((message: string) => {
+    setCutoutError(message);
+    if (cutoutErrorTimerRef.current !== null) window.clearTimeout(cutoutErrorTimerRef.current);
+    cutoutErrorTimerRef.current = window.setTimeout(() => setCutoutError(''), 6000);
+  }, []);
+
+  /** Détoure (ou restaure) le fond de l'image d'un objet déjà incrusté. */
+  const handleToggleCutout = (overlay: PhotoOverlay) => {
+    const original = cutoutOriginals.get(overlay.id);
+    if (original !== undefined) {
+      // Déjà détouré durant cette session : on restaure l'image d'origine.
+      updateOverlay(overlay.id, { imageUrl: original });
+      setCutoutOriginals((prev) => {
+        const next = new Map(prev);
+        next.delete(overlay.id);
+        return next;
+      });
+      return;
+    }
+    setCutoutBusyId(overlay.id);
+    removeBackground(overlay.imageUrl)
+      .then((cutUrl) => {
+        setCutoutOriginals((prev) => {
+          const next = new Map(prev);
+          next.set(overlay.id, overlay.imageUrl);
+          return next;
+        });
+        updateOverlay(overlay.id, { imageUrl: cutUrl });
+        if (cutoutErrorTimerRef.current !== null) {
+          window.clearTimeout(cutoutErrorTimerRef.current);
+          cutoutErrorTimerRef.current = null;
+        }
+        setCutoutError('');
+      })
+      .catch((err: unknown) => {
+        showCutoutError(err instanceof Error ? err.message : 'Détourage impossible.');
+      })
+      .finally(() => setCutoutBusyId(null));
   };
 
   const moveOverlay = (id: ID, direction: -1 | 1) => {
@@ -626,6 +706,12 @@ export default function PhotoStudio() {
     if (!activePhoto) return;
     updatePhoto(activePhoto.id, { overlays: overlays.filter((o) => o.id !== id) });
     if (selectedOverlayId === id) setSelectedOverlayId(null);
+    setCutoutOriginals((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Map(prev);
+      next.delete(id);
+      return next;
+    });
   };
 
   const fileInput = (
@@ -884,6 +970,14 @@ export default function PhotoStudio() {
 
               {showAddPanel && (
                 <div className="ps-add-panel">
+                  <label className="ps-cutout-checkbox">
+                    <input
+                      type="checkbox"
+                      checked={autoCutout}
+                      onChange={(e) => setAutoCutout(e.target.checked)}
+                    />
+                    Détourer automatiquement le fond
+                  </label>
                   <button
                     type="button"
                     className="ps-btn ps-btn-block"
@@ -899,7 +993,7 @@ export default function PhotoStudio() {
                           <button
                             type="button"
                             className="ps-furniture-pick-item"
-                            onClick={() => f.photoUrl && addObjectOverlay(f.photoUrl, f.name)}
+                            onClick={() => f.photoUrl && addObjectOverlayWithCutout(f.photoUrl, f.name)}
                           >
                             <img src={f.photoUrl} alt={f.name} className="ps-furniture-pick-thumb" />
                             <span>{f.name}</span>
@@ -912,6 +1006,7 @@ export default function PhotoStudio() {
                       Ajoutez des meubles avec photo via « Produit du web » dans le catalogue.
                     </p>
                   )}
+                  {addCutoutError && <p className="ps-cutout-error">{addCutoutError}</p>}
                 </div>
               )}
             </div>
@@ -960,6 +1055,22 @@ export default function PhotoStudio() {
                       <div className="ps-overlay-actions">
                         <button
                           type="button"
+                          className={`ps-cutout-btn${cutoutOriginals.has(ov.id) ? ' active' : ''}`}
+                          title={
+                            cutoutOriginals.has(ov.id)
+                              ? "Restaurer l'image d'origine"
+                              : 'Détourer automatiquement le fond'
+                          }
+                          disabled={cutoutBusyId === ov.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleCutout(ov);
+                          }}
+                        >
+                          {cutoutBusyId === ov.id ? '…' : cutoutOriginals.has(ov.id) ? '↩ Original' : '✂ Détourer'}
+                        </button>
+                        <button
+                          type="button"
                           title="Monter"
                           disabled={idx === 0}
                           onClick={(e) => {
@@ -995,6 +1106,7 @@ export default function PhotoStudio() {
                   ))}
                 </ul>
               )}
+              {cutoutError && <p className="ps-error ps-cutout-error">{cutoutError}</p>}
             </div>
 
             <div className="ps-actions">

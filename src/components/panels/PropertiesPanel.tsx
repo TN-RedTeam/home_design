@@ -321,13 +321,26 @@ function OpeningProps({ roomId, openingId }: { roomId: string; openingId: string
 
 function FurnitureProps({ id }: { id: string }) {
   const f = useStore((s) => s.project.furniture.find((x) => x.id === id));
+  const project = useStore((s) => s.project);
   const updateFurniture = useStore((s) => s.updateFurniture);
   const removeFurniture = useStore((s) => s.removeFurniture);
   const duplicateFurniture = useStore((s) => s.duplicateFurniture);
   if (!f) return null;
+  const isStairs = f.shape.startsWith('stairs_');
+  const ownFloor = project.floors.find((fl) => fl.id === f.floorId);
+  const upperFloor = ownFloor
+    ? [...project.floors].sort((a, b) => a.level - b.level).find((fl) => fl.level === ownFloor.level + 1)
+    : undefined;
   return (
     <>
-      <h2>Meuble</h2>
+      <h2>{isStairs ? 'Escalier' : 'Meuble'}</h2>
+      {isStairs && (
+        <p className="hint">
+          {upperFloor
+            ? `Relie « ${ownFloor?.name} » à « ${upperFloor.name} » : sa trémie d'arrivée apparaît en pointillés sur le plan de l'étage supérieur.`
+            : "Aucun étage au-dessus : ajoutez un niveau (panneau Propriétés, sans sélection) pour que cet escalier le desserve."}
+        </p>
+      )}
       <label>
         Nom
         <input value={f.name} onChange={(e) => updateFurniture(f.id, { name: e.target.value })} />
@@ -370,6 +383,45 @@ function FurnitureProps({ id }: { id: string }) {
   );
 }
 
+function FloorsManager() {
+  const project = useStore((s) => s.project);
+  const renameFloor = useStore((s) => s.renameFloor);
+  const removeFloor = useStore((s) => s.removeFloor);
+  const addFloor = useStore((s) => s.addFloor);
+  const floors = [...project.floors].sort((a, b) => a.level - b.level);
+  return (
+    <>
+      <h3>Niveaux</h3>
+      {floors.map((f) => {
+        const nbRooms = project.rooms.filter((r) => r.floorId === f.id).length;
+        return (
+          <div key={f.id} className="dims-row floor-row">
+            <label>
+              Niveau {f.level}
+              <input value={f.name} onChange={(e) => renameFloor(f.id, e.target.value)} />
+            </label>
+            <button
+              className="btn btn-sm btn-danger floor-delete"
+              disabled={floors.length <= 1}
+              title={nbRooms > 0 ? `Supprime le niveau et ses ${nbRooms} pièce(s)` : 'Supprimer ce niveau'}
+              onClick={() => {
+                if (nbRooms === 0 || confirm(`Supprimer « ${f.name} » et ses ${nbRooms} pièce(s) ?`)) removeFloor(f.id);
+              }}
+            >
+              ✕
+            </button>
+          </div>
+        );
+      })}
+      <button className="btn btn-block" onClick={addFloor}>+ Ajouter un étage</button>
+      <p className="hint">
+        Les escaliers relient chaque niveau au suivant : leur trémie d'arrivée apparaît en pointillés
+        sur le plan de l'étage supérieur.
+      </p>
+    </>
+  );
+}
+
 export default function PropertiesPanel() {
   const selection = useStore((s) => s.selection);
   const project = useStore((s) => s.project);
@@ -392,9 +444,11 @@ export default function PropertiesPanel() {
           </p>
           <h3>Le projet</h3>
           <p className="hint">
-            {project.rooms.length} pièce(s) · {project.furniture.length} meuble(s) ·{' '}
+            {project.floors.length} niveau(x) · {project.rooms.length} pièce(s) ·{' '}
+            {project.furniture.length} meuble(s) ·{' '}
             {formatArea(project.rooms.reduce((acc, r) => acc + polygonArea(r.points), 0))} au total
           </p>
+          <FloorsManager />
         </>
       )}
     </aside>

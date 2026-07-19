@@ -618,6 +618,57 @@
   cursor: not-allowed;
 }
 
+/* ---------- Détourage automatique ---------- */
+
+.ps-cutout-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ps-text);
+  cursor: pointer;
+}
+
+.ps-cutout-checkbox input {
+  accent-color: var(--ps-accent);
+}
+
+.ps-overlay-actions .ps-cutout-btn {
+  appearance: none;
+  width: auto;
+  height: auto;
+  border: 1px solid var(--ps-border);
+  background: var(--ps-bg);
+  color: var(--ps-text);
+  border-radius: 5px;
+  padding: 3px 6px;
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ps-overlay-actions .ps-cutout-btn:hover:not(:disabled) {
+  border-color: var(--ps-accent);
+}
+
+.ps-overlay-actions .ps-cutout-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.ps-overlay-actions .ps-cutout-btn.active {
+  border-color: var(--ps-accent);
+  color: var(--ps-accent);
+}
+
+.ps-cutout-error {
+  color: var(--ps-error);
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 6px 0 0;
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 900px) {

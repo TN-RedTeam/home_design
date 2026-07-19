@@ -6,6 +6,15 @@ et visualisez le résultat en 3D — avant d'acheter ou de repeindre quoi que ce
 
 ## Fonctionnalités
 
+### 🏢 Étages multiples reliés par les escaliers
+- Niveaux illimités (rez-de-chaussée, étages…) : sélecteur au-dessus du plan, gestion (renommer,
+  ajouter, supprimer) dans le panneau Propriétés
+- Chaque niveau a ses pièces et ses meubles ; les contours du niveau inférieur s'affichent en
+  filigrane pour aligner les murs porteurs
+- **Liaison par les escaliers** : la trémie d'arrivée d'un escalier apparaît en pointillés sur le
+  plan de l'étage supérieur, pour placer la trémie au bon endroit
+- Vue 3D empilée « maison de poupée » (tous les niveaux à leur hauteur réelle) ou niveau par niveau
+
 ### 🗺️ Plan 2D coté
 - Pièces **polygonales libres** : rectangle rapide ou forme libre point par point (murs en L,
   couloirs, sous-pentes) ; glissez les sommets, scindez un mur (◈), supprimez un sommet (double-clic)
@@ -47,6 +56,9 @@ et visualisez le résultat en 3D — avant d'acheter ou de repeindre quoi que ce
 - **Incrustation d'objets en perspective** : projetez la photo d'un meuble (importée d'un site
   marchand ou reprise d'un « produit du web ») sur la photo de votre pièce en ajustant ses 4 coins ;
   opacité et mode « Multiplier » pour intégrer les visuels sur fond blanc, ordre des calques
+- **Détourage automatique** du fond blanc des photos produit (remplissage par diffusion depuis les
+  bords, contour adouci) — à l'ajout d'un objet, par objet incrusté (réversible), et dans le
+  formulaire « Produit du web » du catalogue
 - Palettes déco, intensité réglable, gomme, export PNG du rendu pour comparer
 
 ### 💾 Projet
@@ -76,11 +88,12 @@ Toutes les dimensions internes sont en **mètres** ; l'interface édite en centi
 
 ```
 src/
-├── types.ts                    # Modèle de domaine (pièces polygonales, murs, ouvertures, meubles, photos)
-├── store/useStore.ts           # Store Zustand + persistance + migrations + édition de sommets
+├── types.ts                    # Modèle de domaine (niveaux, pièces polygonales, murs, ouvertures, meubles, photos)
+├── store/useStore.ts           # Store Zustand + persistance + migrations + niveaux + édition de sommets
 ├── utils/
 │   ├── geometry.ts             # Polygones (aire, centroïde), murs, accrochage, ouvertures
-│   └── homography.ts           # Projection perspective (incrustation photo)
+│   ├── homography.ts           # Projection perspective (incrustation photo)
+│   └── cutout.ts               # Détourage automatique (diffusion depuis les bords)
 ├── data/
 │   ├── catalog.ts              # Catalogue de meubles et escaliers (dimensions réelles)
 │   └── palettes.ts             # Palettes de peinture professionnelles

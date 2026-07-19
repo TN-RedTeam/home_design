@@ -123,6 +123,17 @@ export const FLOOR_COLORS: Record<FloorMaterial, string> = {
   tomette: '#b3593a',
 };
 
+/** Niveau de la maison (rez-de-chaussée, étage 1…). */
+export interface Floor {
+  id: ID;
+  name: string;
+  /** 0 = rez-de-chaussée, 1 = premier étage, etc. */
+  level: number;
+}
+
+/** Épaisseur de dalle entre deux niveaux (m), pour l'empilement 3D. */
+export const SLAB_T = 0.3;
+
 /**
  * Pièce polygonale. `points` : sommets ordonnés (sens horaire) dans le repère
  * du plan, en mètres. Le mur i relie points[i] à points[(i+1) % n] ;
@@ -132,6 +143,8 @@ export interface Room {
   id: ID;
   name: string;
   type: RoomType;
+  /** Niveau d'appartenance. */
+  floorId: ID;
   points: Vec2[];
   walls: RoomWall[];
   /** Hauteur sous plafond en m. */
@@ -211,6 +224,8 @@ export interface PlacedFurniture {
   id: ID;
   /** Référence catalogue, absente pour un meuble personnalisé (relevé photo). */
   catalogId?: ID;
+  /** Niveau d'appartenance. */
+  floorId: ID;
   name: string;
   category: FurnitureCategory;
   shape: FurnitureShape;
@@ -279,6 +294,7 @@ export interface RoomPhoto {
 export interface Project {
   id: ID;
   name: string;
+  floors: Floor[];
   rooms: Room[];
   furniture: PlacedFurniture[];
   photos: RoomPhoto[];

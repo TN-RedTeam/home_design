@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type {
   EditorTool,
+  Floor,
   ID,
   Opening,
   PlacedFurniture,
@@ -22,11 +23,12 @@ export function makeWalls(n: number, color = DEFAULT_WALL): RoomWall[] {
   return Array.from({ length: n }, () => ({ color, open: false }));
 }
 
-export function makeRoom(points: Vec2[], partial?: Partial<Omit<Room, 'points'>>): Room {
+export function makeRoom(points: Vec2[], floorId: ID, partial?: Partial<Omit<Room, 'points'>>): Room {
   return {
     id: uid(),
     name: 'Nouvelle pièce',
     type: 'autre',
+    floorId,
     height: 2.5,
     floor: 'parquet_chene',
     openings: [],
@@ -48,6 +50,8 @@ function normalizeRoom(room: Room): Room {
 }
 
 function demoProject(): Project {
+  const rdc: Floor = { id: uid(), name: 'Rez-de-chaussée', level: 0 };
+  const etage: Floor = { id: uid(), name: 'Étage 1', level: 1 };
   const salon = makeRoom(
     [
       { x: 0, y: 0 },
@@ -57,6 +61,7 @@ function demoProject(): Project {
       { x: 3.2, y: 6.5 },
       { x: 0, y: 6.5 },
     ],
+    rdc.id,
     {
       name: 'Salon-séjour',
       type: 'salon',
@@ -75,7 +80,7 @@ function demoProject(): Project {
       ],
     }
   );
-  const cuisine = makeRoom(rectPoints(5.2, 0, 3.4, 4.1), {
+  const cuisine = makeRoom(rectPoints(5.2, 0, 3.4, 4.1), rdc.id, {
     name: 'Cuisine ouverte',
     type: 'cuisine',
     floor: 'carrelage_gris',
@@ -89,19 +94,44 @@ function demoProject(): Project {
       { id: uid(), type: 'fenetre', wall: 0, offset: 1.1, width: 1.2, height: 1.25, sillHeight: 0.9 },
     ],
   });
-  const chambre = makeRoom(rectPoints(3.2, 4.1, 3.6, 3.4), {
-    name: 'Chambre',
-    type: 'chambre',
+  const chambre = makeRoom(rectPoints(3.2, 4.1, 3.6, 3.4), rdc.id, {
+    name: 'Bureau',
+    type: 'bureau',
     openings: [
       { id: uid(), type: 'porte', wall: 3, offset: 0.4, width: 0.83, height: 2.04, sillHeight: 0 },
       { id: uid(), type: 'fenetre', wall: 2, offset: 1.2, width: 1.2, height: 1.25, sillHeight: 0.9 },
     ],
   });
+  const chambreEtage = makeRoom(rectPoints(0, 0, 5.2, 4.1), etage.id, {
+    name: 'Chambre parentale',
+    type: 'chambre',
+    openings: [
+      { id: uid(), type: 'fenetre', wall: 0, offset: 1.8, width: 1.2, height: 1.25, sillHeight: 0.9 },
+    ],
+    roofWindows: [{ id: uid(), x: 2.6, y: 3.2, width: 0.78, length: 0.98 }],
+  });
+  const escalier: PlacedFurniture = {
+    id: uid(),
+    catalogId: 'escalier-quart-tournant',
+    floorId: rdc.id,
+    name: 'Escalier 1/4 tournant',
+    category: 'escalier',
+    shape: 'stairs_quart',
+    x: 1.05,
+    y: 5.3,
+    rotation: 0,
+    width: 1.9,
+    depth: 2.3,
+    height: 2.7,
+    color: '#a98a62',
+    existing: false,
+  };
   return {
     id: uid(),
     name: 'Ma maison',
-    rooms: [salon, cuisine, chambre],
-    furniture: [],
+    floors: [rdc, etage],
+    rooms: [salon, cuisine, chambre, chambreEtage],
+    furniture: [escalier],
     photos: [],
     updatedAt: Date.now(),
   };
@@ -152,6 +182,7 @@ function migrateLegacyRoom(r: LegacyRoom): Room {
     id: r.id,
     name: r.name,
     type: r.type,
+    floorId: '',
     points,
     walls,
     height: r.height,
@@ -163,9 +194,21 @@ function migrateLegacyRoom(r: LegacyRoom): Room {
 
 /** Convertit un projet potentiellement ancien vers le format courant. */
 export function migrateProject(p: Project): Project {
+  const floors: Floor[] =
+    p.floors && p.floors.length > 0
+      ? [...p.floors].sort((a, b) => a.level - b.level)
+      : [{ id: uid(), name: 'Rez-de-chaussée', level: 0 }];
+  const defaultFloorId = floors[0].id;
+  const validFloor = (id: string | undefined) =>
+    id && floors.some((f) => f.id === id) ? id : defaultFloorId;
   return {
     ...p,
-    rooms: p.rooms.map((r) => normalizeRoom(isLegacyRoom(r) ? migrateLegacyRoom(r) : r)),
+    floors,
+    rooms: p.rooms.map((r) => {
+      const room = normalizeRoom(isLegacyRoom(r) ? migrateLegacyRoom(r) : r);
+      return { ...room, floorId: validFloor(room.floorId) };
+    }),
+    furniture: (p.furniture ?? []).map((f) => ({ ...f, floorId: validFloor(f.floorId) })),
     photos: (p.photos ?? []).map((ph) => ({ ...ph, overlays: ph.overlays ?? [] })),
   };
 }
@@ -185,6 +228,10 @@ interface AppState {
   /** Photo actuellement ouverte dans le Studio Photo. */
   activePhotoId: ID | null;
   snap: boolean;
+  /** Niveau actif dans l'éditeur (repli sur le premier niveau si absent). */
+  activeFloorId: ID | null;
+  /** Vue 3D : tous les niveaux empilés ou seulement le niveau actif. */
+  show3DAllFloors: boolean;
 
   setViewMode: (m: ViewMode) => void;
   setTool: (t: EditorTool) => void;
@@ -193,6 +240,13 @@ interface AppState {
   renameProject: (name: string) => void;
   newProject: () => void;
   importProject: (p: Project) => void;
+
+  setActiveFloor: (id: ID) => void;
+  setShow3DAllFloors: (v: boolean) => void;
+  addFloor: () => void;
+  renameFloor: (id: ID, name: string) => void;
+  /** Supprime un niveau et tout son contenu (interdit s'il n'en reste qu'un). */
+  removeFloor: (id: ID) => void;
 
   addRoom: (points: Vec2[], partial?: Partial<Omit<Room, 'points'>>) => ID;
   updateRoom: (id: ID, patch: Partial<Room>) => void;
@@ -211,7 +265,7 @@ interface AppState {
   updateRoofWindow: (roomId: ID, id: ID, patch: Partial<RoofWindow>) => void;
   removeRoofWindow: (roomId: ID, id: ID) => void;
 
-  addFurniture: (f: Omit<PlacedFurniture, 'id'>) => ID;
+  addFurniture: (f: Omit<PlacedFurniture, 'id' | 'floorId'>) => ID;
   updateFurniture: (id: ID, patch: Partial<PlacedFurniture>) => void;
   removeFurniture: (id: ID) => void;
   duplicateFurniture: (id: ID) => void;
@@ -226,6 +280,12 @@ function touch(p: Project): Project {
   return { ...p, updatedAt: Date.now() };
 }
 
+/** Niveau actif effectif d'un état (repli sur le premier niveau du projet). */
+export function resolveActiveFloor(project: Project, activeFloorId: ID | null): Floor {
+  const sorted = [...project.floors].sort((a, b) => a.level - b.level);
+  return sorted.find((f) => f.id === activeFloorId) ?? sorted[0];
+}
+
 export const useStore = create<AppState>()(
   persist(
     (set, get) => ({
@@ -235,17 +295,56 @@ export const useStore = create<AppState>()(
       viewMode: 'plan',
       activePhotoId: null,
       snap: true,
+      activeFloorId: null,
+      show3DAllFloors: true,
 
       setViewMode: (viewMode) => set({ viewMode }),
       setTool: (tool) => set({ tool }),
       setSnap: (snap) => set({ snap }),
       select: (selection) => set({ selection }),
       renameProject: (name) => set({ project: touch({ ...get().project, name }) }),
-      newProject: () => set({ project: demoProject(), selection: null, activePhotoId: null }),
-      importProject: (p) => set({ project: touch(migrateProject(p)), selection: null, activePhotoId: null }),
+      newProject: () => set({ project: demoProject(), selection: null, activePhotoId: null, activeFloorId: null }),
+      importProject: (p) =>
+        set({ project: touch(migrateProject(p)), selection: null, activePhotoId: null, activeFloorId: null }),
+
+      setActiveFloor: (activeFloorId) => set({ activeFloorId, selection: null }),
+      setShow3DAllFloors: (show3DAllFloors) => set({ show3DAllFloors }),
+      addFloor: () => {
+        const { project } = get();
+        const level = Math.max(...project.floors.map((f) => f.level)) + 1;
+        const floor: Floor = { id: uid(), name: `Étage ${level}`, level };
+        set({
+          project: touch({ ...project, floors: [...project.floors, floor] }),
+          activeFloorId: floor.id,
+          selection: null,
+        });
+      },
+      renameFloor: (id, name) =>
+        set({
+          project: touch({
+            ...get().project,
+            floors: get().project.floors.map((f) => (f.id === id ? { ...f, name } : f)),
+          }),
+        }),
+      removeFloor: (id) => {
+        const { project, activeFloorId } = get();
+        if (project.floors.length <= 1) return;
+        const floors = project.floors.filter((f) => f.id !== id);
+        set({
+          project: touch({
+            ...project,
+            floors,
+            rooms: project.rooms.filter((r) => r.floorId !== id),
+            furniture: project.furniture.filter((f) => f.floorId !== id),
+          }),
+          activeFloorId: activeFloorId === id ? null : activeFloorId,
+          selection: null,
+        });
+      },
 
       addRoom: (points, partial) => {
-        const room = makeRoom(points, partial);
+        const floorId = resolveActiveFloor(get().project, get().activeFloorId).id;
+        const room = makeRoom(points, floorId, partial);
         set({
           project: touch({ ...get().project, rooms: [...get().project.rooms, room] }),
           selection: { kind: 'room', id: room.id },
@@ -400,10 +499,11 @@ export const useStore = create<AppState>()(
 
       addFurniture: (f) => {
         const id = uid();
+        const floorId = resolveActiveFloor(get().project, get().activeFloorId).id;
         set({
           project: touch({
             ...get().project,
-            furniture: [...get().project.furniture, { ...f, id }],
+            furniture: [...get().project.furniture, { ...f, id, floorId }],
           }),
           selection: { kind: 'furniture', id },
         });
@@ -464,7 +564,7 @@ export const useStore = create<AppState>()(
     }),
     {
       name: 'home-design-project',
-      version: 2,
+      version: 3,
       partialize: (s) => ({ project: s.project }),
       migrate: (persisted) => {
         const state = persisted as { project?: Project };

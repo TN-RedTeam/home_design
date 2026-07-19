@@ -3,6 +3,7 @@ import { CATALOG } from '../../data/catalog';
 import { useStore } from '../../store/useStore';
 import type { CatalogItem, FurnitureCategory, FurnitureShape } from '../../types';
 import { CATEGORY_LABELS, formatLength } from '../../types';
+import { removeBackground } from '../../utils/cutout';
 import { polygonCentroid } from '../../utils/geometry';
 
 /** Centre de placement : pièce sélectionnée, sinon première pièce, sinon origine. */
@@ -69,7 +70,31 @@ export default function CatalogPanel() {
   const [showWebForm, setShowWebForm] = useState(false);
   const [form, setForm] = useState<WebForm>(EMPTY_FORM);
   const [webError, setWebError] = useState('');
+  const [cutoutBusy, setCutoutBusy] = useState(false);
+  /** Image avant détourage, pour pouvoir revenir en arrière. */
+  const [photoOriginal, setPhotoOriginal] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  const cutout = async () => {
+    if (!form.photoUrl || cutoutBusy) return;
+    setCutoutBusy(true);
+    setWebError('');
+    try {
+      const cut = await removeBackground(form.photoUrl);
+      setPhotoOriginal(form.photoUrl);
+      setForm((f) => ({ ...f, photoUrl: cut }));
+    } catch (e) {
+      setWebError(e instanceof Error ? e.message : 'Détourage impossible.');
+    } finally {
+      setCutoutBusy(false);
+    }
+  };
+
+  const undoCutout = () => {
+    if (!photoOriginal) return;
+    setForm((f) => ({ ...f, photoUrl: photoOriginal }));
+    setPhotoOriginal(null);
+  };
 
   const items = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -105,6 +130,7 @@ export default function CatalogPanel() {
       const blob = await res.blob();
       if (!blob.type.startsWith('image/')) throw new Error("L'URL ne pointe pas vers une image");
       const dataUrl = await readImageAsDataUrl(new File([blob], 'web-image', { type: blob.type }));
+      setPhotoOriginal(null);
       setForm((f) => ({ ...f, photoUrl: dataUrl }));
     } catch {
       setWebError(
@@ -136,6 +162,7 @@ export default function CatalogPanel() {
       photoUrl: form.photoUrl,
     });
     setForm(EMPTY_FORM);
+    setPhotoOriginal(null);
     setWebError('');
     setShowWebForm(false);
   };
@@ -239,6 +266,7 @@ export default function CatalogPanel() {
               try {
                 setForm((f) => ({ ...f }));
                 const dataUrl = await readImageAsDataUrl(file);
+                setPhotoOriginal(null);
                 setForm((f) => ({ ...f, photoUrl: dataUrl }));
                 setWebError('');
               } catch {
@@ -247,7 +275,21 @@ export default function CatalogPanel() {
               e.target.value = '';
             }}
           />
-          {form.photoUrl && <img className="web-preview" src={form.photoUrl} alt="Aperçu produit" />}
+          {form.photoUrl && (
+            <>
+              <img className="web-preview" src={form.photoUrl} alt="Aperçu produit" />
+              <div className="dims-row">
+                <button className="btn btn-sm" onClick={cutout} disabled={cutoutBusy || !!photoOriginal}>
+                  {cutoutBusy ? 'Détourage…' : '✂ Détourer le fond'}
+                </button>
+                {photoOriginal && (
+                  <button className="btn btn-sm" onClick={undoCutout}>
+                    ↩ Rétablir l'original
+                  </button>
+                )}
+              </div>
+            </>
+          )}
           {webError && <p className="error">{webError}</p>}
           <button className="btn btn-accent btn-block" onClick={submitWeb}>
             Placer sur le plan

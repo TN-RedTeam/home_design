@@ -2,9 +2,9 @@ import { Canvas } from '@react-three/fiber';
 import { OrbitControls, ContactShadows } from '@react-three/drei';
 import { useMemo } from 'react';
 import * as THREE from 'three';
-import { useStore } from '../../store/useStore';
+import { resolveActiveFloor, useStore } from '../../store/useStore';
 import type { PlacedFurniture, Room } from '../../types';
-import { FLOOR_COLORS } from '../../types';
+import { FLOOR_COLORS, SLAB_T } from '../../types';
 import { planBounds, wallEndpoints } from '../../utils/geometry';
 
 const WALL_T = 0.12;
@@ -582,6 +582,25 @@ export default function View3D() {
   const project = useStore((s) => s.project);
   const selection = useStore((s) => s.selection);
   const select = useStore((s) => s.select);
+  const activeFloorId = useStore((s) => s.activeFloorId);
+  const setActiveFloor = useStore((s) => s.setActiveFloor);
+  const showAll = useStore((s) => s.show3DAllFloors);
+  const setShowAll = useStore((s) => s.setShow3DAllFloors);
+
+  const activeFloor = resolveActiveFloor(project, activeFloorId);
+  const floorsSorted = [...project.floors].sort((a, b) => a.level - b.level);
+
+  /** Décalage vertical de chaque niveau : somme des hauteurs (+ dalle) des niveaux inférieurs. */
+  const yOffsets = new Map<string, number>();
+  let acc = 0;
+  for (const fl of floorsSorted) {
+    yOffsets.set(fl.id, acc);
+    const heights = project.rooms.filter((r) => r.floorId === fl.id).map((r) => r.height);
+    acc += (heights.length > 0 ? Math.max(...heights) : 2.5) + SLAB_T;
+  }
+
+  const visibleFloors = showAll ? floorsSorted : [activeFloor];
+  const offsetOf = (floorId: string) => (showAll ? (yOffsets.get(floorId) ?? 0) : 0);
 
   const b = planBounds(project.rooms, 0);
   const cx = (b.minX + b.maxX) / 2;
@@ -589,7 +608,24 @@ export default function View3D() {
   const span = Math.max(b.maxX - b.minX, b.maxY - b.minY, 6);
 
   return (
-    <div style={{ flex: 1, minWidth: 0, background: '#111318' }}>
+    <div style={{ flex: 1, minWidth: 0, background: '#111318', position: 'relative' }}>
+      <div className="floor-switcher view3d-switcher">
+        <button className={showAll ? 'active' : ''} onClick={() => setShowAll(true)}>
+          Tous les niveaux
+        </button>
+        {floorsSorted.map((f) => (
+          <button
+            key={f.id}
+            className={!showAll && f.id === activeFloor.id ? 'active' : ''}
+            onClick={() => {
+              setShowAll(false);
+              setActiveFloor(f.id);
+            }}
+          >
+            {f.name}
+          </button>
+        ))}
+      </div>
       <Canvas
         shadows
         camera={{ position: [cx + span * 0.7, span * 0.8, cz + span * 1.1], fov: 50 }}
@@ -605,11 +641,19 @@ export default function View3D() {
         />
         <hemisphereLight args={['#cfd8e8', '#3a3228', 0.5]} />
 
-        {project.rooms.map((room) => (
-          <RoomMesh key={room.id} room={room} selected={selection?.kind === 'room' && selection.id === room.id} />
-        ))}
-        {project.furniture.map((f) => (
-          <FurnitureMesh key={f.id} f={f} selected={selection?.kind === 'furniture' && selection.id === f.id} />
+        {visibleFloors.map((fl) => (
+          <group key={fl.id} position={[0, offsetOf(fl.id), 0]}>
+            {project.rooms
+              .filter((r) => r.floorId === fl.id)
+              .map((room) => (
+                <RoomMesh key={room.id} room={room} selected={selection?.kind === 'room' && selection.id === room.id} />
+              ))}
+            {project.furniture
+              .filter((f) => f.floorId === fl.id)
+              .map((f) => (
+                <FurnitureMesh key={f.id} f={f} selected={selection?.kind === 'furniture' && selection.id === f.id} />
+              ))}
+          </group>
         ))}
 
         <ContactShadows position={[cx, -FLOOR_T - 0.01, cz]} scale={span * 2.5} opacity={0.4} blur={2} far={4} />

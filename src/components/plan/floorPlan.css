@@ -1,0 +1,136 @@
+.plan-editor {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  background: #16181c;
+}
+
+.plan-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+
+.plan-svg.tool-addRoom { cursor: crosshair; }
+.plan-svg.tool-measure { cursor: crosshair; }
+.plan-svg:active { cursor: grabbing; }
+
+.grid-minor { stroke: #1e2127; stroke-width: 1; }
+.grid-major { stroke: #262a32; stroke-width: 1; }
+
+.room-floor { cursor: move; }
+.room-walls {
+  fill: none;
+  stroke: #3a3f4a;
+}
+.room.selected .room-walls { stroke: #d4a373; }
+
+.room-name {
+  fill: #e8e6e1;
+  font-size: 14px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.35);
+  stroke-width: 3px;
+}
+.room-area {
+  fill: #c9c5bc;
+  font-size: 11px;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.35);
+  stroke-width: 3px;
+}
+
+.opening-gap { fill: #16181c; }
+.window-line { stroke: #7fb3d5; stroke-width: 2; }
+.door-leaf { stroke: #d5c27f; stroke-width: 2.5; }
+.door-arc { fill: none; stroke: #d5c27f; stroke-width: 1; stroke-dasharray: 4 3; opacity: 0.7; }
+.opening.selected .window-line,
+.opening.selected .door-leaf { stroke: #d4a373; }
+
+.furn-shape {
+  stroke: rgba(0, 0, 0, 0.45);
+  stroke-width: 1.5;
+}
+.furniture.selected .furn-shape {
+  stroke: #d4a373;
+  stroke-width: 2.5;
+}
+.furniture.existing .furn-shape { stroke-dasharray: 5 3; }
+
+.furn-label {
+  fill: #fff;
+  font-size: 10px;
+  font-weight: 500;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.5);
+  stroke-width: 2.5px;
+  pointer-events: none;
+  user-select: none;
+}
+.furn-dims {
+  fill: #d4a373;
+  font-size: 11px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 3px;
+}
+
+.handle {
+  fill: #d4a373;
+  stroke: #16181c;
+  stroke-width: 1.5;
+  rx: 2;
+}
+
+.rotate-line { stroke: #d4a373; stroke-width: 1.5; stroke-dasharray: 3 2; }
+.rotate-handle {
+  fill: #26282e;
+  stroke: #d4a373;
+  stroke-width: 2;
+  cursor: grab;
+}
+
+.dim-line { stroke: #8b93a5; stroke-width: 1; }
+.dim-text {
+  fill: #b9c0cf;
+  font-size: 11px;
+  font-weight: 600;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 3px;
+}
+
+.draw-preview rect {
+  fill: rgba(212, 163, 115, 0.15);
+  stroke: #d4a373;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
+
+.measure-line { stroke: #7fb3d5; stroke-width: 2; stroke-dasharray: 6 4; }
+.measure-text {
+  fill: #7fb3d5;
+  font-size: 13px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 3px;
+}
+
+.plan-hints {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(28, 30, 34, 0.85);
+  color: #9aa1b0;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  pointer-events: none;
+  white-space: nowrap;
+}

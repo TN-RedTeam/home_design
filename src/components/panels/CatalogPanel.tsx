@@ -3,6 +3,7 @@ import { CATALOG } from '../../data/catalog';
 import { useStore } from '../../store/useStore';
 import type { CatalogItem, FurnitureCategory, FurnitureShape } from '../../types';
 import { CATEGORY_LABELS, formatLength } from '../../types';
+import { polygonCentroid } from '../../utils/geometry';
 
 /** Centre de placement : pièce sélectionnée, sinon première pièce, sinon origine. */
 function usePlacementCenter() {
@@ -11,9 +12,7 @@ function usePlacementCenter() {
   const room =
     (selection?.kind === 'room' && project.rooms.find((r) => r.id === selection.id)) ||
     project.rooms[0];
-  return room
-    ? { x: room.x + room.width / 2, y: room.y + room.length / 2 }
-    : { x: 2, y: 2 };
+  return room ? polygonCentroid(room.points) : { x: 2, y: 2 };
 }
 
 function readImageAsDataUrl(file: File, maxW = 600): Promise<string> {

@@ -1,13 +1,26 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useStore } from '../../store/useStore';
-import type { Opening, PlacedFurniture, Room } from '../../types';
+import type { Opening, PlacedFurniture, Room, Vec2 } from '../../types';
 import { FLOOR_COLORS, formatArea, formatLength } from '../../types';
-import { clamp, openingSegment, planBounds, snapTo, wallLength } from '../../utils/geometry';
+import {
+  clamp,
+  dist,
+  openingSegment,
+  planBounds,
+  polygonArea,
+  polygonCentroid,
+  rectPoints,
+  snapTo,
+  translatePoints,
+  wallEndpoints,
+} from '../../utils/geometry';
 import './floorPlan.css';
 
 /** Épaisseur visuelle des murs en mètres. */
 const WALL_T = 0.15;
 const MIN_ROOM = 1;
+/** Distance (m) sous laquelle un clic ferme le polygone en cours. */
+const POLY_CLOSE_DIST = 0.35;
 
 interface View {
   x: number; // coin haut-gauche du viewport en mètres
@@ -17,14 +30,26 @@ interface View {
 
 type DragState =
   | { mode: 'pan'; startX: number; startY: number; viewX: number; viewY: number }
-  | { mode: 'room'; id: string; dx: number; dy: number }
+  | { mode: 'room'; id: string; startPointer: Vec2; startPoints: Vec2[] }
+  | { mode: 'vertex'; roomId: string; index: number }
   | { mode: 'furniture'; id: string; dx: number; dy: number }
   | { mode: 'rotate'; id: string; cx: number; cy: number }
-  | { mode: 'resize-room'; id: string; handle: string; orig: Room }
   | { mode: 'opening'; roomId: string; id: string }
+  | { mode: 'roofWindow'; roomId: string; id: string; dx: number; dy: number }
   | { mode: 'draw'; x0: number; y0: number; x1: number; y1: number }
   | { mode: 'measure'; x0: number; y0: number; x1: number; y1: number }
   | null;
+
+/** Aire signée (positive = ordre horaire dans un repère y vers le bas). */
+function signedArea(points: Vec2[]): number {
+  let s = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    s += a.x * b.y - b.x * a.y;
+  }
+  return s / 2;
+}
 
 export default function FloorPlanEditor() {
   const project = useStore((s) => s.project);
@@ -36,17 +61,27 @@ export default function FloorPlanEditor() {
   const addRoom = useStore((s) => s.addRoom);
   const updateRoom = useStore((s) => s.updateRoom);
   const removeRoom = useStore((s) => s.removeRoom);
+  const insertVertex = useStore((s) => s.insertVertex);
+  const removeVertex = useStore((s) => s.removeVertex);
   const updateFurniture = useStore((s) => s.updateFurniture);
   const removeFurniture = useStore((s) => s.removeFurniture);
   const duplicateFurniture = useStore((s) => s.duplicateFurniture);
   const updateOpening = useStore((s) => s.updateOpening);
   const removeOpening = useStore((s) => s.removeOpening);
+  const updateRoofWindow = useStore((s) => s.updateRoofWindow);
+  const removeRoofWindow = useStore((s) => s.removeRoofWindow);
 
   const svgRef = useRef<SVGSVGElement>(null);
   const [view, setView] = useState<View>({ x: -1, y: -1, scale: 70 });
   const [drag, setDrag] = useState<DragState>(null);
   const dragRef = useRef<DragState>(null);
   dragRef.current = drag;
+
+  /** Polygone libre en cours de dessin (outil addPoly). */
+  const [polyDraft, setPolyDraft] = useState<Vec2[]>([]);
+  const [polyCursor, setPolyCursor] = useState<Vec2 | null>(null);
+  const polyRef = useRef<Vec2[]>([]);
+  polyRef.current = polyDraft;
 
   // Ajuste la vue au plan au premier rendu.
   useEffect(() => {
@@ -63,6 +98,14 @@ export default function FloorPlanEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Abandonne le polygone en cours si l'on change d'outil.
+  useEffect(() => {
+    if (tool !== 'addPoly') {
+      setPolyDraft([]);
+      setPolyCursor(null);
+    }
+  }, [tool]);
+
   const toWorld = useCallback(
     (clientX: number, clientY: number) => {
       const rect = svgRef.current!.getBoundingClientRect();
@@ -75,26 +118,45 @@ export default function FloorPlanEditor() {
   );
 
   // Zoom molette centré sur le curseur.
-  const onWheel = useCallback(
-    (e: React.WheelEvent) => {
-      const rect = svgRef.current!.getBoundingClientRect();
-      const mx = e.clientX - rect.left;
-      const my = e.clientY - rect.top;
-      setView((v) => {
-        const scale = clamp(v.scale * (e.deltaY < 0 ? 1.12 : 0.89), 12, 300);
-        return {
-          scale,
-          x: v.x + mx / v.scale - mx / scale,
-          y: v.y + my / v.scale - my / scale,
-        };
-      });
-    },
-    []
-  );
+  const onWheel = useCallback((e: React.WheelEvent) => {
+    const rect = svgRef.current!.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    setView((v) => {
+      const scale = clamp(v.scale * (e.deltaY < 0 ? 1.12 : 0.89), 12, 300);
+      return {
+        scale,
+        x: v.x + mx / v.scale - mx / scale,
+        y: v.y + my / v.scale - my / scale,
+      };
+    });
+  }, []);
+
+  const closePolyDraft = useCallback(() => {
+    const pts = polyRef.current;
+    if (pts.length >= 3 && polygonArea(pts) >= MIN_ROOM) {
+      // Normalise l'orientation en sens horaire pour que murs et cotes soient cohérents.
+      const oriented = signedArea(pts) < 0 ? [...pts].reverse() : pts;
+      addRoom(oriented, { name: `Pièce ${project.rooms.length + 1}` });
+      setTool('select');
+    }
+    setPolyDraft([]);
+    setPolyCursor(null);
+  }, [addRoom, project.rooms.length, setTool]);
 
   const onBackgroundDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
     const w = toWorld(e.clientX, e.clientY);
+    if (tool === 'addPoly') {
+      const p = { x: snapTo(w.x, snap), y: snapTo(w.y, snap) };
+      const pts = polyRef.current;
+      if (pts.length >= 3 && dist(p, pts[0]) < POLY_CLOSE_DIST) {
+        closePolyDraft();
+      } else {
+        setPolyDraft([...pts, p]);
+      }
+      return;
+    }
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     if (tool === 'addRoom') {
       setDrag({ mode: 'draw', x0: snapTo(w.x, snap), y0: snapTo(w.y, snap), x1: w.x, y1: w.y });
@@ -107,9 +169,12 @@ export default function FloorPlanEditor() {
   };
 
   const onMove = (e: React.PointerEvent) => {
+    const w = toWorld(e.clientX, e.clientY);
+    if (tool === 'addPoly') {
+      setPolyCursor({ x: snapTo(w.x, snap), y: snapTo(w.y, snap) });
+    }
     const d = dragRef.current;
     if (!d) return;
-    const w = toWorld(e.clientX, e.clientY);
     switch (d.mode) {
       case 'pan':
         setView((v) => ({
@@ -122,9 +187,19 @@ export default function FloorPlanEditor() {
       case 'measure':
         setDrag({ ...d, x1: snapTo(w.x, snap), y1: snapTo(w.y, snap) });
         break;
-      case 'room':
-        updateRoom(d.id, { x: snapTo(w.x - d.dx, snap), y: snapTo(w.y - d.dy, snap) });
+      case 'room': {
+        const dx = snapTo(w.x - d.startPointer.x, snap);
+        const dy = snapTo(w.y - d.startPointer.y, snap);
+        updateRoom(d.id, { points: translatePoints(d.startPoints, dx, dy) });
         break;
+      }
+      case 'vertex': {
+        const room = project.rooms.find((r) => r.id === d.roomId);
+        if (!room) break;
+        const p = { x: snapTo(w.x, snap), y: snapTo(w.y, snap) };
+        updateRoom(d.roomId, { points: room.points.map((pt, i) => (i === d.index ? p : pt)) });
+        break;
+      }
       case 'furniture':
         updateFurniture(d.id, { x: snapTo(w.x - d.dx, snap), y: snapTo(w.y - d.dy, snap) });
         break;
@@ -134,33 +209,19 @@ export default function FloorPlanEditor() {
         updateFurniture(d.id, { rotation: ((snapped % 360) + 360) % 360 });
         break;
       }
-      case 'resize-room': {
-        const o = d.orig;
-        const patch: Partial<Room> = {};
-        const sx = snapTo(w.x, snap);
-        const sy = snapTo(w.y, snap);
-        if (d.handle.includes('w')) {
-          const right = o.x + o.width;
-          patch.x = Math.min(sx, right - MIN_ROOM);
-          patch.width = right - patch.x;
-        }
-        if (d.handle.includes('e')) patch.width = Math.max(MIN_ROOM, sx - o.x);
-        if (d.handle.includes('n')) {
-          const bottom = o.y + o.length;
-          patch.y = Math.min(sy, bottom - MIN_ROOM);
-          patch.length = bottom - patch.y;
-        }
-        if (d.handle.includes('s')) patch.length = Math.max(MIN_ROOM, sy - o.y);
-        updateRoom(d.id, patch);
+      case 'roofWindow':
+        updateRoofWindow(d.roomId, d.id, { x: snapTo(w.x - d.dx, snap), y: snapTo(w.y - d.dy, snap) });
         break;
-      }
       case 'opening': {
         const room = project.rooms.find((r) => r.id === d.roomId);
         const op = room?.openings.find((o) => o.id === d.id);
         if (!room || !op) break;
-        const along = op.wall === 'N' || op.wall === 'S' ? w.x - room.x : w.y - room.y;
-        const max = Math.max(0, wallLength(room, op.wall) - op.width);
-        updateOpening(d.roomId, d.id, { offset: clamp(snapTo(along - op.width / 2, snap), 0, max) });
+        const { a, b } = wallEndpoints(room, op.wall);
+        const len = dist(a, b);
+        if (len < 1e-9) break;
+        const t = ((w.x - a.x) * (b.x - a.x) + (w.y - a.y) * (b.y - a.y)) / len;
+        const max = Math.max(0, len - op.width);
+        updateOpening(d.roomId, d.id, { offset: clamp(snapTo(t - op.width / 2, snap), 0, max) });
         break;
       }
     }
@@ -174,7 +235,7 @@ export default function FloorPlanEditor() {
       const width = Math.abs(d.x1 - d.x0);
       const length = Math.abs(d.y1 - d.y0);
       if (width >= MIN_ROOM && length >= MIN_ROOM) {
-        addRoom({ x, y, width, length, name: `Pièce ${project.rooms.length + 1}` });
+        addRoom(rectPoints(x, y, width, length), { name: `Pièce ${project.rooms.length + 1}` });
         setTool('select');
       }
     }
@@ -186,11 +247,24 @@ export default function FloorPlanEditor() {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
-      if (e.key === 'Escape') select(null);
+      if (e.key === 'Enter' && tool === 'addPoly') {
+        closePolyDraft();
+        return;
+      }
+      if (e.key === 'Escape') {
+        if (tool === 'addPoly' && polyRef.current.length > 0) {
+          setPolyDraft([]);
+          setPolyCursor(null);
+        } else {
+          select(null);
+        }
+        return;
+      }
       if ((e.key === 'Delete' || e.key === 'Backspace') && selection) {
         if (selection.kind === 'room') removeRoom(selection.id);
         if (selection.kind === 'furniture') removeFurniture(selection.id);
         if (selection.kind === 'opening') removeOpening(selection.roomId, selection.id);
+        if (selection.kind === 'roofWindow') removeRoofWindow(selection.roomId, selection.id);
       }
       if (selection?.kind === 'furniture') {
         const f = project.furniture.find((x) => x.id === selection.id);
@@ -201,7 +275,7 @@ export default function FloorPlanEditor() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selection, project, select, removeRoom, removeFurniture, removeOpening, updateFurniture, duplicateFurniture]);
+  }, [selection, project, tool, select, removeRoom, removeFurniture, removeOpening, removeRoofWindow, updateFurniture, duplicateFurniture, closePolyDraft]);
 
   const startRoomDrag = (e: React.PointerEvent, room: Room) => {
     if (tool !== 'select' || e.button !== 0) return;
@@ -209,7 +283,7 @@ export default function FloorPlanEditor() {
     svgRef.current!.setPointerCapture(e.pointerId);
     const w = toWorld(e.clientX, e.clientY);
     select({ kind: 'room', id: room.id });
-    setDrag({ mode: 'room', id: room.id, dx: w.x - room.x, dy: w.y - room.y });
+    setDrag({ mode: 'room', id: room.id, startPointer: w, startPoints: room.points });
   };
 
   const startFurnitureDrag = (e: React.PointerEvent, f: PlacedFurniture) => {
@@ -259,7 +333,6 @@ export default function FloorPlanEditor() {
   const renderOpening = (room: Room, o: Opening) => {
     const seg = openingSegment(room, o);
     const isSel = selection?.kind === 'opening' && selection.id === o.id;
-    const horizontal = o.wall === 'N' || o.wall === 'S';
     const t = px(WALL_T);
     const cx = X((seg.x1 + seg.x2) / 2);
     const cy = Y((seg.y1 + seg.y2) / 2);
@@ -267,7 +340,7 @@ export default function FloorPlanEditor() {
     return (
       <g
         key={o.id}
-        transform={`rotate(${horizontal ? 0 : 90} ${cx} ${cy})`}
+        transform={`rotate(${seg.angle} ${cx} ${cy})`}
         className={`opening ${isSel ? 'selected' : ''}`}
         onPointerDown={(e) => {
           if (tool !== 'select' || e.button !== 0) return;
@@ -279,74 +352,210 @@ export default function FloorPlanEditor() {
       >
         {/* Coupe le mur */}
         <rect x={cx - len / 2} y={cy - t / 2 - 1} width={len} height={t + 2} className="opening-gap" />
-        {o.type === 'fenetre' ? (
+        {o.type === 'fenetre' || o.type === 'double_fenetre' ? (
           <>
             <line x1={cx - len / 2} y1={cy - t / 6} x2={cx + len / 2} y2={cy - t / 6} className="window-line" />
             <line x1={cx - len / 2} y1={cy + t / 6} x2={cx + len / 2} y2={cy + t / 6} className="window-line" />
+            {o.type === 'double_fenetre' && (
+              <line x1={cx} y1={cy - t / 2} x2={cx} y2={cy + t / 2} className="window-mullion" />
+            )}
           </>
         ) : (
           <>
-            <line x1={cx - len / 2} y1={cy} x2={cx - len / 2} y2={cy - len} className="door-leaf" />
+            <line
+              x1={cx - len / 2}
+              y1={cy}
+              x2={cx - len / 2}
+              y2={cy - len}
+              className={o.type === 'porte_entree' ? 'door-leaf entry' : 'door-leaf'}
+            />
             <path d={`M ${cx - len / 2} ${cy - len} A ${len} ${len} 0 0 1 ${cx + len / 2} ${cy}`} className="door-arc" />
+            {o.type === 'porte_entree' && (
+              <rect x={cx - len / 2} y={cy - t / 2} width={len} height={t} className="entry-sill" />
+            )}
             {o.type === 'porte_fenetre' && (
               <line x1={cx - len / 2} y1={cy + t / 6} x2={cx + len / 2} y2={cy + t / 6} className="window-line" />
             )}
           </>
         )}
-        <rect x={cx - len / 2} y={cy - t} width={len} height={t * 2} fill="transparent" style={{ cursor: 'ew-resize' }} />
+        <rect x={cx - len / 2} y={cy - t} width={len} height={t * 2} fill="transparent" style={{ cursor: 'move' }} />
       </g>
     );
   };
 
+  /** Cotes de chaque mur, décalées vers l'extérieur (polygone horaire ⇒ normale = (uy, -ux)). */
   const renderDims = (room: Room) => {
-    const off = 0.45; // décalage des cotes en m
+    const off = 0.4;
     return (
-      <g className="dims">
-        <line x1={X(room.x)} y1={Y(room.y - off)} x2={X(room.x + room.width)} y2={Y(room.y - off)} className="dim-line" markerStart="url(#arrow)" markerEnd="url(#arrow)" />
-        <text x={X(room.x + room.width / 2)} y={Y(room.y - off) - 5} className="dim-text" textAnchor="middle">
-          {formatLength(room.width)}
-        </text>
-        <line x1={X(room.x - off)} y1={Y(room.y)} x2={X(room.x - off)} y2={Y(room.y + room.length)} className="dim-line" markerStart="url(#arrow)" markerEnd="url(#arrow)" />
-        <text
-          x={X(room.x - off) - 5}
-          y={Y(room.y + room.length / 2)}
-          className="dim-text"
-          textAnchor="middle"
-          transform={`rotate(-90 ${X(room.x - off) - 5} ${Y(room.y + room.length / 2)})`}
-        >
-          {formatLength(room.length)}
-        </text>
+      <g className="dims" pointerEvents="none">
+        {room.points.map((a, i) => {
+          const b = room.points[(i + 1) % room.points.length];
+          const len = dist(a, b);
+          if (len < 0.15) return null;
+          const ux = (b.x - a.x) / len;
+          const uy = (b.y - a.y) / len;
+          const nx = uy;
+          const ny = -ux;
+          const mx = (a.x + b.x) / 2 + nx * off;
+          const my = (a.y + b.y) / 2 + ny * off;
+          let angle = (Math.atan2(uy, ux) * 180) / Math.PI;
+          if (angle > 90 || angle <= -90) angle += 180;
+          return (
+            <text
+              key={i}
+              x={X(mx)}
+              y={Y(my)}
+              className="dim-text"
+              textAnchor="middle"
+              transform={`rotate(${angle} ${X(mx)} ${Y(my)})`}
+            >
+              {formatLength(len)}
+            </text>
+          );
+        })}
       </g>
     );
   };
 
-  const renderRoomHandles = (room: Room) => {
-    const handles: { h: string; x: number; y: number; cursor: string }[] = [
-      { h: 'nw', x: room.x, y: room.y, cursor: 'nwse-resize' },
-      { h: 'ne', x: room.x + room.width, y: room.y, cursor: 'nesw-resize' },
-      { h: 'sw', x: room.x, y: room.y + room.length, cursor: 'nesw-resize' },
-      { h: 'se', x: room.x + room.width, y: room.y + room.length, cursor: 'nwse-resize' },
-      { h: 'n', x: room.x + room.width / 2, y: room.y, cursor: 'ns-resize' },
-      { h: 's', x: room.x + room.width / 2, y: room.y + room.length, cursor: 'ns-resize' },
-      { h: 'w', x: room.x, y: room.y + room.length / 2, cursor: 'ew-resize' },
-      { h: 'e', x: room.x + room.width, y: room.y + room.length / 2, cursor: 'ew-resize' },
-    ];
-    return handles.map((h) => (
-      <rect
-        key={h.h}
-        x={X(h.x) - 5}
-        y={Y(h.y) - 5}
-        width={10}
-        height={10}
-        className="handle"
-        style={{ cursor: h.cursor }}
+  /** Poignées de sommets + boutons d'insertion au milieu de chaque mur. */
+  const renderRoomHandles = (room: Room) => (
+    <g className="room-handles">
+      {room.points.map((p, i) => {
+        const b = room.points[(i + 1) % room.points.length];
+        const mid = { x: (p.x + b.x) / 2, y: (p.y + b.y) / 2 };
+        return (
+          <g key={i}>
+            <circle
+              cx={X(mid.x)}
+              cy={Y(mid.y)}
+              r={6}
+              className="mid-handle"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                insertVertex(room.id, i);
+              }}
+            >
+              <title>Ajouter un sommet (scinde le mur)</title>
+            </circle>
+            <circle
+              cx={X(p.x)}
+              cy={Y(p.y)}
+              r={6.5}
+              className="vertex-handle"
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                svgRef.current!.setPointerCapture(e.pointerId);
+                setDrag({ mode: 'vertex', roomId: room.id, index: i });
+              }}
+              onDoubleClick={(e) => {
+                e.stopPropagation();
+                if (room.points.length > 3) removeVertex(room.id, i);
+              }}
+            >
+              <title>Glisser pour déplacer · double-clic pour supprimer le sommet</title>
+            </circle>
+          </g>
+        );
+      })}
+    </g>
+  );
+
+  /** Fenêtre de toit : rectangle pointillé avec croix, posé sur le plafond de la pièce. */
+  const renderRoofWindow = (room: Room, rw: Room['roofWindows'][number]) => {
+    const isSel = selection?.kind === 'roofWindow' && selection.id === rw.id;
+    const x0 = X(rw.x - rw.width / 2);
+    const y0 = Y(rw.y - rw.length / 2);
+    const w = px(rw.width);
+    const h = px(rw.length);
+    return (
+      <g
+        key={rw.id}
+        className={`roof-window ${isSel ? 'selected' : ''}`}
         onPointerDown={(e) => {
+          if (tool !== 'select' || e.button !== 0) return;
           e.stopPropagation();
           svgRef.current!.setPointerCapture(e.pointerId);
-          setDrag({ mode: 'resize-room', id: room.id, handle: h.h, orig: { ...room } });
+          const wpt = toWorld(e.clientX, e.clientY);
+          select({ kind: 'roofWindow', roomId: room.id, id: rw.id });
+          setDrag({ mode: 'roofWindow', roomId: room.id, id: rw.id, dx: wpt.x - rw.x, dy: wpt.y - rw.y });
         }}
-      />
-    ));
+        style={{ cursor: 'move' }}
+      >
+        <rect x={x0} y={y0} width={w} height={h} className="roof-window-rect" />
+        <line x1={x0} y1={y0} x2={x0 + w} y2={y0 + h} className="roof-window-cross" />
+        <line x1={x0 + w} y1={y0} x2={x0} y2={y0 + h} className="roof-window-cross" />
+        {s > 40 && (
+          <text x={x0 + w / 2} y={y0 - 4} className="roof-window-label" textAnchor="middle">
+            Velux
+          </text>
+        )}
+      </g>
+    );
+  };
+
+  /** Rendu stylisé des escaliers (marches + sens de montée). */
+  const renderStairs = (f: PlacedFurniture, cx: number, cy: number, w: number, d: number) => {
+    const x0 = cx - w / 2;
+    const y0 = cy - d / 2;
+    const stepPx = Math.max(8, px(0.25));
+    const nodes: React.ReactNode[] = [
+      <rect key="outline" x={x0} y={y0} width={w} height={d} fill={f.color} className="furn-shape" />,
+    ];
+    const arrow = (points: string, tipX: number, tipY: number, tipAngle: number) => (
+      <g key="arrow" className="stair-arrow" pointerEvents="none">
+        <polyline points={points} />
+        <line x1={tipX} y1={tipY} x2={tipX + 6 * Math.cos(((tipAngle + 150) * Math.PI) / 180)} y2={tipY + 6 * Math.sin(((tipAngle + 150) * Math.PI) / 180)} />
+        <line x1={tipX} y1={tipY} x2={tipX + 6 * Math.cos(((tipAngle - 150) * Math.PI) / 180)} y2={tipY + 6 * Math.sin(((tipAngle - 150) * Math.PI) / 180)} />
+      </g>
+    );
+    if (f.shape === 'stairs_droit') {
+      for (let y = y0 + stepPx; y < y0 + d - 2; y += stepPx) {
+        nodes.push(<line key={`s${y}`} x1={x0} y1={y} x2={x0 + w} y2={y} className="stair-line" />);
+      }
+      nodes.push(arrow(`${cx},${y0 + d - 6} ${cx},${y0 + 6}`, cx, y0 + 6, -90));
+    } else if (f.shape === 'stairs_quart') {
+      const px1 = x0 + w * 0.55; // pivot du quart tournant
+      const py1 = y0 + d * 0.6;
+      for (let x = x0 + stepPx; x < px1 - 2; x += stepPx) {
+        nodes.push(<line key={`a${x}`} x1={x} y1={py1} x2={x} y2={y0 + d} className="stair-line" />);
+      }
+      for (let y = y0 + stepPx; y < py1 - 2; y += stepPx) {
+        nodes.push(<line key={`b${y}`} x1={px1} y1={y} x2={x0 + w} y2={y} className="stair-line" />);
+      }
+      nodes.push(<line key="f1" x1={px1} y1={py1} x2={x0 + w} y2={y0 + d * 0.85} className="stair-line" />);
+      nodes.push(<line key="f2" x1={px1} y1={py1} x2={x0 + w * 0.85} y2={y0 + d} className="stair-line" />);
+      nodes.push(<line key="f3" x1={px1} y1={py1} x2={x0 + w} y2={y0 + d} className="stair-line" />);
+      const midX = (px1 + x0 + w) / 2;
+      nodes.push(arrow(`${x0 + 8},${y0 + d * 0.8} ${midX},${y0 + d * 0.8} ${midX},${y0 + 8}`, midX, y0 + 8, -90));
+    } else if (f.shape === 'stairs_demi') {
+      const bandW = w * 0.44;
+      const landingH = d * 0.28;
+      for (let y = y0 + landingH + stepPx; y < y0 + d - 2; y += stepPx) {
+        nodes.push(<line key={`l${y}`} x1={x0} y1={y} x2={x0 + bandW} y2={y} className="stair-line" />);
+        nodes.push(<line key={`r${y}`} x1={x0 + w - bandW} y1={y} x2={x0 + w} y2={y} className="stair-line" />);
+      }
+      nodes.push(<line key="sep" x1={cx} y1={y0 + landingH} x2={cx} y2={y0 + d} className="stair-line" />);
+      nodes.push(<line key="d1" x1={x0} y1={y0 + landingH} x2={x0 + w} y2={y0 + landingH} className="stair-line" />);
+      nodes.push(<line key="d2" x1={x0} y1={y0 + landingH} x2={cx} y2={y0} className="stair-line" />);
+      nodes.push(<line key="d3" x1={cx} y1={y0} x2={x0 + w} y2={y0 + landingH} className="stair-line" />);
+      const lx = x0 + bandW / 2;
+      const rx = x0 + w - bandW / 2;
+      nodes.push(
+        arrow(`${lx},${y0 + d - 6} ${lx},${y0 + landingH / 1.5} ${rx},${y0 + landingH / 1.5} ${rx},${y0 + d - 6}`, rx, y0 + d - 6, 90)
+      );
+    } else {
+      // Colimaçon : cage ronde, fût central et marches rayonnantes.
+      nodes.length = 0;
+      nodes.push(<ellipse key="outline" cx={cx} cy={cy} rx={w / 2} ry={d / 2} fill={f.color} className="furn-shape" />);
+      for (let i = 0; i < 10; i++) {
+        const a = (i / 10) * Math.PI * 2;
+        nodes.push(
+          <line key={`r${i}`} x1={cx} y1={cy} x2={cx + (w / 2) * Math.cos(a)} y2={cy + (d / 2) * Math.sin(a)} className="stair-line" />
+        );
+      }
+      nodes.push(<circle key="pole" cx={cx} cy={cy} r={Math.max(3, px(0.08))} className="stair-pole" />);
+    }
+    return nodes;
   };
 
   const renderFurniture = (f: PlacedFurniture) => {
@@ -358,7 +567,9 @@ export default function FloorPlanEditor() {
     return (
       <g key={f.id} transform={`rotate(${f.rotation} ${cx} ${cy})`} className={`furniture ${isSel ? 'selected' : ''} ${f.existing ? 'existing' : ''}`}>
         <g onPointerDown={(e) => startFurnitureDrag(e, f)} style={{ cursor: 'move' }}>
-          {f.shape === 'round' ? (
+          {f.shape.startsWith('stairs_') ? (
+            <g>{renderStairs(f, cx, cy, w, d)}</g>
+          ) : f.shape === 'round' ? (
             <ellipse cx={cx} cy={cy} rx={w / 2} ry={d / 2} fill={f.color} className="furn-shape" />
           ) : f.shape === 'lshape' ? (
             <path
@@ -410,6 +621,53 @@ export default function FloorPlanEditor() {
     );
   };
 
+  const renderRoom = (room: Room) => {
+    const isSel = selection?.kind === 'room' && selection.id === room.id;
+    const centroid = polygonCentroid(room.points);
+    const pathPoints = room.points.map((p) => `${X(p.x)},${Y(p.y)}`).join(' ');
+    return (
+      <g key={room.id} className={`room ${isSel ? 'selected' : ''}`}>
+        <polygon
+          points={pathPoints}
+          fill={FLOOR_COLORS[room.floor]}
+          className="room-floor"
+          onPointerDown={(e) => startRoomDrag(e, room)}
+        />
+        {/* Murs : trait épais si fermé, pointillé fin si ouvert. */}
+        {room.points.map((a, i) => {
+          const b = room.points[(i + 1) % room.points.length];
+          const open = room.walls[i]?.open;
+          return (
+            <line
+              key={i}
+              x1={X(a.x)}
+              y1={Y(a.y)}
+              x2={X(b.x)}
+              y2={Y(b.y)}
+              className={open ? 'room-wall-open' : 'room-wall'}
+              strokeWidth={open ? 2 : px(WALL_T)}
+              pointerEvents="none"
+            />
+          );
+        })}
+        {room.openings.map((o) => renderOpening(room, o))}
+        {room.roofWindows.map((rw) => renderRoofWindow(room, rw))}
+        {s > 25 && (
+          <g pointerEvents="none">
+            <text x={X(centroid.x)} y={Y(centroid.y) - 8} className="room-name" textAnchor="middle">
+              {room.name}
+            </text>
+            <text x={X(centroid.x)} y={Y(centroid.y) + 10} className="room-area" textAnchor="middle">
+              {formatArea(polygonArea(room.points))}
+            </text>
+          </g>
+        )}
+        {isSel && renderDims(room)}
+        {isSel && renderRoomHandles(room)}
+      </g>
+    );
+  };
+
   return (
     <div className="plan-editor">
       <svg
@@ -421,52 +679,9 @@ export default function FloorPlanEditor() {
         onPointerUp={onUp}
         onPointerLeave={() => setDrag(null)}
       >
-        <defs>
-          <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-            <path d="M 0 0 L 10 5 L 0 10 z" fill="#8b93a5" />
-          </marker>
-        </defs>
         <g className="grid">{gridLines}</g>
 
-        {project.rooms.map((room) => {
-          const isSel = selection?.kind === 'room' && selection.id === room.id;
-          return (
-            <g key={room.id} className={`room ${isSel ? 'selected' : ''}`}>
-              <rect
-                x={X(room.x)}
-                y={Y(room.y)}
-                width={px(room.width)}
-                height={px(room.length)}
-                fill={FLOOR_COLORS[room.floor]}
-                className="room-floor"
-                onPointerDown={(e) => startRoomDrag(e, room)}
-              />
-              <rect
-                x={X(room.x) - px(WALL_T) / 2}
-                y={Y(room.y) - px(WALL_T) / 2}
-                width={px(room.width) + px(WALL_T)}
-                height={px(room.length) + px(WALL_T)}
-                className="room-walls"
-                strokeWidth={px(WALL_T)}
-                pointerEvents="none"
-              />
-              {room.openings.map((o) => renderOpening(room, o))}
-              {s > 25 && (
-                <g pointerEvents="none">
-                  <text x={X(room.x + room.width / 2)} y={Y(room.y + room.length / 2) - 8} className="room-name" textAnchor="middle">
-                    {room.name}
-                  </text>
-                  <text x={X(room.x + room.width / 2)} y={Y(room.y + room.length / 2) + 10} className="room-area" textAnchor="middle">
-                    {formatArea(room.width * room.length)}
-                  </text>
-                </g>
-              )}
-              {isSel && renderDims(room)}
-              {isSel && renderRoomHandles(room)}
-            </g>
-          );
-        })}
-
+        {project.rooms.map(renderRoom)}
         {project.furniture.map(renderFurniture)}
 
         {drag?.mode === 'draw' && (
@@ -483,6 +698,23 @@ export default function FloorPlanEditor() {
           </g>
         )}
 
+        {tool === 'addPoly' && polyDraft.length > 0 && (
+          <g className="draw-preview">
+            <polyline
+              points={[...polyDraft, ...(polyCursor ? [polyCursor] : [])].map((p) => `${X(p.x)},${Y(p.y)}`).join(' ')}
+              className="poly-preview"
+            />
+            {polyDraft.map((p, i) => (
+              <circle key={i} cx={X(p.x)} cy={Y(p.y)} r={i === 0 ? 7 : 4} className={i === 0 ? 'poly-start' : 'poly-point'} />
+            ))}
+            {polyCursor && polyDraft.length >= 1 && (
+              <text x={X(polyCursor.x)} y={Y(polyCursor.y) - 12} textAnchor="middle" className="dim-text">
+                {formatLength(dist(polyDraft[polyDraft.length - 1], polyCursor))}
+              </text>
+            )}
+          </g>
+        )}
+
         {drag?.mode === 'measure' && (
           <g className="measure">
             <line x1={X(drag.x0)} y1={Y(drag.y0)} x2={X(drag.x1)} y2={Y(drag.y1)} className="measure-line" />
@@ -494,10 +726,12 @@ export default function FloorPlanEditor() {
       </svg>
       <div className="plan-hints">
         {tool === 'addRoom'
-          ? 'Cliquez-glissez pour dessiner une pièce'
-          : tool === 'measure'
-            ? 'Cliquez-glissez pour mesurer une distance'
-            : 'Molette : zoom · Glisser le fond : déplacer · R : pivoter · D : dupliquer · Suppr : supprimer'}
+          ? 'Cliquez-glissez pour dessiner une pièce rectangulaire'
+          : tool === 'addPoly'
+            ? 'Cliquez pour poser les sommets · cliquez sur le premier point ou Entrée pour fermer · Échap pour annuler'
+            : tool === 'measure'
+              ? 'Cliquez-glissez pour mesurer une distance'
+              : 'Molette : zoom · Glisser le fond : déplacer · Pièce sélectionnée : glissez les sommets, ◈ scinde un mur, double-clic supprime un sommet'}
       </div>
     </div>
   );

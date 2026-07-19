@@ -1,12 +1,14 @@
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, ContactShadows } from '@react-three/drei';
 import { useMemo } from 'react';
+import * as THREE from 'three';
 import { useStore } from '../../store/useStore';
-import type { PlacedFurniture, Room, WallSide } from '../../types';
+import type { PlacedFurniture, Room } from '../../types';
 import { FLOOR_COLORS } from '../../types';
-import { planBounds } from '../../utils/geometry';
+import { planBounds, wallEndpoints } from '../../utils/geometry';
 
 const WALL_T = 0.12;
+const FLOOR_T = 0.1;
 
 interface WallSeg {
   /** Position le long du mur (début) en m. */
@@ -21,11 +23,10 @@ interface WallSeg {
  * Découpe un mur en segments pleins autour de ses ouvertures :
  * trumeaux pleine hauteur, linteaux au-dessus, allèges sous les fenêtres.
  */
-function wallSegments(room: Room, side: WallSide): WallSeg[] {
-  const len = side === 'N' || side === 'S' ? room.width : room.length;
+function wallSegments(room: Room, wall: number, len: number): WallSeg[] {
   const H = room.height;
   const ops = room.openings
-    .filter((o) => o.wall === side)
+    .filter((o) => o.wall === wall)
     .map((o) => ({ ...o, offset: Math.min(o.offset, Math.max(0, len - o.width)) }))
     .sort((a, b) => a.offset - b.offset);
 
@@ -42,49 +43,59 @@ function wallSegments(room: Room, side: WallSide): WallSeg[] {
   return segs.filter((s) => s.to - s.from > 0.01 && s.top - s.bottom > 0.01);
 }
 
-function Wall({ room, side }: { room: Room; side: WallSide }) {
-  const segs = useMemo(() => wallSegments(room, side), [room, side]);
-  const color = room.wallColors[side];
+function Wall({ room, wall }: { room: Room; wall: number }) {
+  const { a, b } = wallEndpoints(room, wall);
+  const len = Math.hypot(b.x - a.x, b.y - a.y);
+  const segs = useMemo(() => wallSegments(room, wall, len), [room, wall, len]);
+  if (room.walls[wall]?.open || len < 0.01) return null;
+  const angle = Math.atan2(b.y - a.y, b.x - a.x);
+  const ux = (b.x - a.x) / len;
+  const uy = (b.y - a.y) / len;
+  const color = room.walls[wall]?.color ?? '#f4f1ea';
+
+  const at = (t: number): [number, number] => [a.x + ux * t, a.y + uy * t];
+
   return (
     <>
-      {segs.map((s, i) => {
-        const segLen = s.to - s.from;
-        const h = s.top - s.bottom;
-        const mid = (s.from + s.to) / 2;
-        const y = s.bottom + h / 2;
-        let x = 0, z = 0, horizontal = true;
-        switch (side) {
-          case 'N': x = room.x + mid; z = room.y; horizontal = true; break;
-          case 'S': x = room.x + mid; z = room.y + room.length; horizontal = true; break;
-          case 'W': x = room.x; z = room.y + mid; horizontal = false; break;
-          case 'E': x = room.x + room.width; z = room.y + mid; horizontal = false; break;
-        }
+      {segs.map((seg, i) => {
+        const segLen = seg.to - seg.from;
+        const h = seg.top - seg.bottom;
+        const [mx, mz] = at((seg.from + seg.to) / 2);
         return (
-          <mesh key={i} position={[x, y, z]} castShadow receiveShadow>
-            <boxGeometry args={horizontal ? [segLen, h, WALL_T] : [WALL_T, h, segLen]} />
+          <mesh key={i} position={[mx, seg.bottom + h / 2, mz]} rotation={[0, -angle, 0]} castShadow receiveShadow>
+            <boxGeometry args={[segLen, h, WALL_T]} />
             <meshStandardMaterial color={color} roughness={0.92} />
           </mesh>
         );
       })}
-      {/* Vitrage des fenêtres */}
+      {/* Vitrages, meneaux et vantaux dans les ouvertures */}
       {room.openings
-        .filter((o) => o.wall === side && o.type !== 'porte')
+        .filter((o) => o.wall === wall)
         .map((o) => {
-          const mid = o.offset + o.width / 2;
-          const y = o.sillHeight + o.height / 2;
-          let x = 0, z = 0;
-          const horizontal = side === 'N' || side === 'S';
-          switch (side) {
-            case 'N': x = room.x + mid; z = room.y; break;
-            case 'S': x = room.x + mid; z = room.y + room.length; break;
-            case 'W': x = room.x; z = room.y + mid; break;
-            case 'E': x = room.x + room.width; z = room.y + mid; break;
+          const off = Math.min(o.offset, Math.max(0, len - o.width));
+          const [mx, mz] = at(off + o.width / 2);
+          const cy = o.sillHeight + o.height / 2;
+          if (o.type === 'porte' || o.type === 'porte_entree') {
+            return (
+              <mesh key={o.id} position={[mx, cy, mz]} rotation={[0, -angle, 0]} castShadow>
+                <boxGeometry args={[o.width * 0.96, o.height * 0.98, 0.05]} />
+                <meshStandardMaterial color={o.type === 'porte_entree' ? '#5d4632' : '#8a7358'} roughness={0.6} />
+              </mesh>
+            );
           }
           return (
-            <mesh key={o.id} position={[x, y, z]}>
-              <boxGeometry args={horizontal ? [o.width, o.height, 0.02] : [0.02, o.height, o.width]} />
-              <meshStandardMaterial color="#aaccee" transparent opacity={0.3} roughness={0.1} metalness={0.3} />
-            </mesh>
+            <group key={o.id} position={[mx, cy, mz]} rotation={[0, -angle, 0]}>
+              <mesh>
+                <boxGeometry args={[o.width, o.height, 0.02]} />
+                <meshStandardMaterial color="#aaccee" transparent opacity={0.3} roughness={0.1} metalness={0.3} />
+              </mesh>
+              {o.type === 'double_fenetre' && (
+                <mesh castShadow>
+                  <boxGeometry args={[0.06, o.height, WALL_T * 0.7]} />
+                  <meshStandardMaterial color="#e8e6e1" roughness={0.7} />
+                </mesh>
+              )}
+            </group>
           );
         })}
     </>
@@ -93,28 +104,430 @@ function Wall({ room, side }: { room: Room; side: WallSide }) {
 
 function RoomMesh({ room, selected }: { room: Room; selected: boolean }) {
   const select = useStore((s) => s.select);
+
+  const floorGeometry = useMemo(() => {
+    const shape = new THREE.Shape();
+    room.points.forEach((p, i) => (i === 0 ? shape.moveTo(p.x, p.y) : shape.lineTo(p.x, p.y)));
+    shape.closePath();
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: FLOOR_T, bevelEnabled: false });
+    geo.computeVertexNormals();
+    return geo;
+  }, [room.points]);
+
+  const highlightGeometry = useMemo(() => {
+    if (!selected) return null;
+    const shape = new THREE.Shape();
+    room.points.forEach((p, i) => (i === 0 ? shape.moveTo(p.x, p.y) : shape.lineTo(p.x, p.y)));
+    shape.closePath();
+    return new THREE.ShapeGeometry(shape);
+  }, [room.points, selected]);
+
   return (
     <group>
+      {/* Extrusion en XY puis bascule : le plan (x, y) devient (X, Z), la dalle part sous y=0. */}
       <mesh
-        position={[room.x + room.width / 2, -0.05, room.y + room.length / 2]}
+        geometry={floorGeometry}
+        rotation={[Math.PI / 2, 0, 0]}
         receiveShadow
         onClick={(e) => {
           e.stopPropagation();
           select({ kind: 'room', id: room.id });
         }}
       >
-        <boxGeometry args={[room.width, 0.1, room.length]} />
         <meshStandardMaterial color={FLOOR_COLORS[room.floor]} roughness={0.85} />
       </mesh>
-      {selected && (
-        <mesh position={[room.x + room.width / 2, 0.011, room.y + room.length / 2]} rotation={[-Math.PI / 2, 0, 0]}>
-          <planeGeometry args={[room.width, room.length]} />
-          <meshBasicMaterial color="#d4a373" transparent opacity={0.12} />
+      {selected && highlightGeometry && (
+        <mesh geometry={highlightGeometry} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.012, 0]}>
+          <meshBasicMaterial color="#d4a373" transparent opacity={0.12} side={THREE.DoubleSide} />
         </mesh>
       )}
-      {(['N', 'S', 'E', 'W'] as WallSide[]).map((side) => (
-        <Wall key={side} room={room} side={side} />
+      {room.points.map((_, i) => (
+        <Wall key={i} room={room} wall={i} />
       ))}
+      {/* Fenêtres de toit : verrière lumineuse posée au niveau du plafond. */}
+      {room.roofWindows.map((rw) => (
+        <group key={rw.id} position={[rw.x, room.height + 0.02, rw.y]}>
+          <mesh rotation={[-Math.PI / 2, 0, 0]}>
+            <planeGeometry args={[rw.width, rw.length]} />
+            <meshStandardMaterial
+              color="#cfe6f5"
+              emissive="#bcd8ee"
+              emissiveIntensity={0.9}
+              transparent
+              opacity={0.85}
+              side={THREE.DoubleSide}
+            />
+          </mesh>
+          <pointLight position={[0, -0.3, 0]} intensity={2.5} distance={4.5} color="#eaf4ff" decay={2} />
+        </group>
+      ))}
+    </group>
+  );
+}
+
+/** Escaliers volumétriques : marches cumulées selon le type. */
+function StairsMesh({ f, selected, onClick }: { f: PlacedFurniture; selected: boolean; onClick: (e: { stopPropagation: () => void }) => void }) {
+  const mat = (
+    <meshStandardMaterial color={f.color} roughness={0.75} emissive={selected ? '#d4a373' : '#000000'} emissiveIntensity={selected ? 0.25 : 0} />
+  );
+  const parts: React.ReactNode[] = [];
+  const { width: w, depth: d, height: h } = f;
+
+  if (f.shape === 'stairs_droit') {
+    const n = Math.max(8, Math.round(h / 0.19));
+    const stepD = d / n;
+    for (let i = 0; i < n; i++) {
+      const sh = ((i + 1) / n) * h;
+      parts.push(
+        <mesh key={i} position={[0, sh / 2, d / 2 - (i + 0.5) * stepD]} castShadow onClick={onClick}>
+          <boxGeometry args={[w, sh, stepD]} />
+          {mat}
+        </mesh>
+      );
+    }
+  } else if (f.shape === 'stairs_quart') {
+    const nA = 6;
+    const bandD = d * 0.4;
+    const flightAW = w * 0.55;
+    for (let i = 0; i < nA; i++) {
+      const sh = ((i + 1) / nA) * h * 0.45;
+      const stepW = flightAW / nA;
+      parts.push(
+        <mesh key={`a${i}`} position={[-w / 2 + (i + 0.5) * stepW, sh / 2, d / 2 - bandD / 2]} castShadow onClick={onClick}>
+          <boxGeometry args={[stepW, sh, bandD]} />
+          {mat}
+        </mesh>
+      );
+    }
+    parts.push(
+      <mesh key="palier" position={[-w / 2 + flightAW + (w - flightAW) / 2, h * 0.475, d / 2 - bandD / 2]} castShadow onClick={onClick}>
+        <boxGeometry args={[w - flightAW, h * 0.95 * 0.5, bandD]} />
+        {mat}
+      </mesh>
+    );
+    const nB = 7;
+    const flightBD = d - bandD;
+    for (let i = 0; i < nB; i++) {
+      const sh = h * 0.5 + ((i + 1) / nB) * h * 0.5;
+      const stepD = flightBD / nB;
+      parts.push(
+        <mesh key={`b${i}`} position={[-w / 2 + flightAW + (w - flightAW) / 2, sh / 2, d / 2 - bandD - (i + 0.5) * stepD]} castShadow onClick={onClick}>
+          <boxGeometry args={[w - flightAW, sh, stepD]} />
+          {mat}
+        </mesh>
+      );
+    }
+  } else if (f.shape === 'stairs_demi') {
+    const bandW = w * 0.44;
+    const landingD = d * 0.28;
+    const flightD = d - landingD;
+    const n = 7;
+    for (let i = 0; i < n; i++) {
+      const stepD = flightD / n;
+      const shUp = ((i + 1) / n) * h * 0.45;
+      parts.push(
+        <mesh key={`l${i}`} position={[-w / 2 + bandW / 2, shUp / 2, d / 2 - (i + 0.5) * stepD]} castShadow onClick={onClick}>
+          <boxGeometry args={[bandW, shUp, stepD]} />
+          {mat}
+        </mesh>
+      );
+      const shDown = h * 0.5 + ((i + 1) / n) * h * 0.5;
+      parts.push(
+        <mesh key={`r${i}`} position={[w / 2 - bandW / 2, shDown / 2, -d / 2 + landingD + (i + 0.5) * stepD]} castShadow onClick={onClick}>
+          <boxGeometry args={[bandW, shDown, stepD]} />
+          {mat}
+        </mesh>
+      );
+    }
+    parts.push(
+      <mesh key="palier" position={[0, h * 0.475, -d / 2 + landingD / 2]} castShadow onClick={onClick}>
+        <boxGeometry args={[w, h * 0.95 * 0.5, landingD]} />
+        {mat}
+      </mesh>
+    );
+  } else {
+    // Colimaçon
+    const n = 14;
+    const r = Math.min(w, d) / 2;
+    parts.push(
+      <mesh key="pole" position={[0, h / 2, 0]} castShadow onClick={onClick}>
+        <cylinderGeometry args={[0.05, 0.05, h, 12]} />
+        {mat}
+      </mesh>
+    );
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 1.9;
+      const y = ((i + 1) / n) * (h - 0.1);
+      parts.push(
+        <group key={i} rotation={[0, -a, 0]}>
+          <mesh position={[r / 2, y, 0]} castShadow onClick={onClick}>
+            <boxGeometry args={[r, 0.05, r * 0.42]} />
+            {mat}
+          </mesh>
+        </group>
+      );
+    }
+  }
+  return <>{parts}</>;
+}
+
+/** Assombrit / éclaircit une couleur hex (facteur < 1 = plus sombre). */
+function shade(hex: string, factor: number): string {
+  const n = parseInt(hex.replace('#', ''), 16);
+  if (Number.isNaN(n)) return hex;
+  const ch = (v: number) => Math.min(255, Math.max(0, Math.round(v * factor)));
+  const r = ch((n >> 16) & 255);
+  const g = ch((n >> 8) & 255);
+  const b = ch(n & 255);
+  return `#${((r << 16) | (g << 8) | b).toString(16).padStart(6, '0')}`;
+}
+
+type ClickHandler = (e: { stopPropagation: () => void }) => void;
+
+interface BuilderProps {
+  f: PlacedFurniture;
+  selected: boolean;
+  onClick: ClickHandler;
+}
+
+function furnMaterial(color: string, selected: boolean, roughness = 0.8) {
+  return (
+    <meshStandardMaterial
+      color={color}
+      roughness={roughness}
+      emissive={selected ? '#d4a373' : '#000000'}
+      emissiveIntensity={selected ? 0.25 : 0}
+    />
+  );
+}
+
+/** Canapé / fauteuil : assise + dossier + accoudoirs (droit ou d'angle). */
+function SofaMesh({ f, selected, onClick }: BuilderProps) {
+  const { width: w, depth: d, height: h } = f;
+  const armW = Math.min(0.16, w * 0.14);
+  const backD = d * 0.24;
+  const seatH = h * 0.42;
+  const armH = h * 0.7;
+  const body = furnMaterial(f.color, selected);
+  const dark = furnMaterial(shade(f.color, 0.82), selected);
+  if (f.shape === 'lshape') {
+    return (
+      <group>
+        {/* Aile principale (fond) + son dossier */}
+        <mesh position={[0, seatH / 2, -d * 0.225]} castShadow onClick={onClick}>
+          <boxGeometry args={[w, seatH, d * 0.55]} />
+          {body}
+        </mesh>
+        <mesh position={[0, h / 2, -d / 2 + backD / 2]} castShadow onClick={onClick}>
+          <boxGeometry args={[w, h, backD]} />
+          {dark}
+        </mesh>
+        {/* Méridienne (retour) + dossier extérieur */}
+        <mesh position={[-w * 0.225, seatH / 2, d * 0.225]} castShadow onClick={onClick}>
+          <boxGeometry args={[w * 0.55, seatH, d * 0.45]} />
+          {body}
+        </mesh>
+        <mesh position={[-w / 2 + armW / 2, armH / 2, d * 0.225]} castShadow onClick={onClick}>
+          <boxGeometry args={[armW, armH, d * 0.45]} />
+          {dark}
+        </mesh>
+        <mesh position={[w / 2 - armW / 2, armH / 2, -d * 0.225]} castShadow onClick={onClick}>
+          <boxGeometry args={[armW, armH, d * 0.55]} />
+          {dark}
+        </mesh>
+      </group>
+    );
+  }
+  return (
+    <group>
+      <mesh position={[0, seatH / 2, backD * 0.3]} castShadow onClick={onClick}>
+        <boxGeometry args={[w, seatH, d - backD * 0.6]} />
+        {body}
+      </mesh>
+      <mesh position={[0, h / 2, -d / 2 + backD / 2]} castShadow onClick={onClick}>
+        <boxGeometry args={[w - armW, h, backD]} />
+        {dark}
+      </mesh>
+      <mesh position={[-w / 2 + armW / 2, armH / 2, 0]} castShadow onClick={onClick}>
+        <boxGeometry args={[armW, armH, d]} />
+        {dark}
+      </mesh>
+      <mesh position={[w / 2 - armW / 2, armH / 2, 0]} castShadow onClick={onClick}>
+        <boxGeometry args={[armW, armH, d]} />
+        {dark}
+      </mesh>
+      {/* Coussins d'assise */}
+      <mesh position={[0, seatH + 0.03, backD * 0.3]} castShadow onClick={onClick}>
+        <boxGeometry args={[w - armW * 2 - 0.04, 0.09, d - backD * 1.2]} />
+        {furnMaterial(shade(f.color, 1.08), selected, 0.9)}
+      </mesh>
+    </group>
+  );
+}
+
+/** Chaise : assise, dossier, 4 pieds. */
+function ChairMesh({ f, selected, onClick }: BuilderProps) {
+  const { width: w, depth: d, height: h } = f;
+  const seatY = Math.min(0.47, h * 0.55);
+  const legR = 0.02;
+  const body = furnMaterial(f.color, selected);
+  const dark = furnMaterial(shade(f.color, 0.75), selected);
+  const lx = w / 2 - 0.04;
+  const lz = d / 2 - 0.04;
+  return (
+    <group>
+      <mesh position={[0, seatY, 0]} castShadow onClick={onClick}>
+        <boxGeometry args={[w, 0.05, d]} />
+        {body}
+      </mesh>
+      <mesh position={[0, (seatY + h) / 2, -d / 2 + 0.02]} castShadow onClick={onClick}>
+        <boxGeometry args={[w * 0.9, h - seatY, 0.04]} />
+        {body}
+      </mesh>
+      {[[-lx, -lz], [lx, -lz], [-lx, lz], [lx, lz]].map(([px, pz], i) => (
+        <mesh key={i} position={[px, seatY / 2, pz]} castShadow onClick={onClick}>
+          <cylinderGeometry args={[legR, legR, seatY, 8]} />
+          {dark}
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** Table / bureau : plateau + pieds (central pour les rondes). */
+function TableMesh({ f, selected, onClick }: BuilderProps) {
+  const { width: w, depth: d, height: h } = f;
+  const topT = 0.045;
+  const body = furnMaterial(f.color, selected, 0.6);
+  const dark = furnMaterial(shade(f.color, 0.72), selected);
+  if (f.shape === 'round') {
+    return (
+      <group>
+        <mesh position={[0, h - topT / 2, 0]} castShadow onClick={onClick}>
+          <cylinderGeometry args={[w / 2, w / 2, topT, 32]} />
+          {body}
+        </mesh>
+        <mesh position={[0, (h - topT) / 2, 0]} castShadow onClick={onClick}>
+          <cylinderGeometry args={[0.05, 0.05, h - topT, 12]} />
+          {dark}
+        </mesh>
+        <mesh position={[0, 0.02, 0]} castShadow onClick={onClick}>
+          <cylinderGeometry args={[w / 4, w / 4, 0.04, 24]} />
+          {dark}
+        </mesh>
+      </group>
+    );
+  }
+  const lx = w / 2 - 0.06;
+  const lz = d / 2 - 0.06;
+  return (
+    <group>
+      <mesh position={[0, h - topT / 2, 0]} castShadow onClick={onClick}>
+        <boxGeometry args={[w, topT, d]} />
+        {body}
+      </mesh>
+      {[[-lx, -lz], [lx, -lz], [-lx, lz], [lx, lz]].map(([px, pz], i) => (
+        <mesh key={i} position={[px, (h - topT) / 2, pz]} castShadow onClick={onClick}>
+          <boxGeometry args={[0.06, h - topT, 0.06]} />
+          {dark}
+        </mesh>
+      ))}
+      {f.category === 'bureau' && (
+        <mesh position={[w / 4, h - topT - 0.15, 0]} castShadow onClick={onClick}>
+          <boxGeometry args={[w * 0.4, 0.3, d * 0.9]} />
+          {dark}
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+/** Lit : cadre, matelas, tête de lit et oreillers. */
+function BedMesh({ f, selected, onClick }: BuilderProps) {
+  const { width: w, depth: d, height: h } = f;
+  const frameH = h * 0.4;
+  const body = furnMaterial(shade(f.color, 0.8), selected);
+  return (
+    <group>
+      <mesh position={[0, frameH / 2, 0]} castShadow onClick={onClick}>
+        <boxGeometry args={[w, frameH, d]} />
+        {body}
+      </mesh>
+      <mesh position={[0, frameH + h * 0.14, 0.02]} castShadow onClick={onClick}>
+        <boxGeometry args={[w - 0.06, h * 0.28, d - 0.1]} />
+        {furnMaterial('#efe9dd', selected, 0.95)}
+      </mesh>
+      <mesh position={[0, h * 0.65, -d / 2 + 0.04]} castShadow onClick={onClick}>
+        <boxGeometry args={[w, h * 1.3, 0.08]} />
+        {furnMaterial(f.color, selected)}
+      </mesh>
+      {[-w / 4, w / 4].map((px, i) => (
+        <mesh key={i} position={[w > 1.2 ? px : 0, frameH + h * 0.32, -d / 2 + 0.35]} castShadow onClick={onClick}>
+          <boxGeometry args={[Math.min(0.55, w * 0.38), 0.12, 0.35]} />
+          {furnMaterial('#ffffff', selected, 0.95)}
+        </mesh>
+      ))}
+    </group>
+  );
+}
+
+/** Plante décorative : pot + feuillage. */
+function PlantMesh({ f, selected, onClick }: BuilderProps) {
+  const { width: w, height: h } = f;
+  return (
+    <group>
+      <mesh position={[0, h * 0.15, 0]} castShadow onClick={onClick}>
+        <cylinderGeometry args={[w * 0.28, w * 0.22, h * 0.3, 16]} />
+        {furnMaterial('#9a6b4f', selected)}
+      </mesh>
+      <mesh position={[0, h * 0.62, 0]} castShadow onClick={onClick}>
+        <sphereGeometry args={[w * 0.5, 16, 12]} />
+        {furnMaterial('#4f7a4a', selected, 0.95)}
+      </mesh>
+      <mesh position={[w * 0.2, h * 0.78, w * 0.1]} castShadow onClick={onClick}>
+        <sphereGeometry args={[w * 0.3, 12, 10]} />
+        {furnMaterial('#5d8a54', selected, 0.95)}
+      </mesh>
+    </group>
+  );
+}
+
+/** Volume simple avec la photo produit plaquée sur la face avant si disponible. */
+function BoxMesh({ f, selected, onClick }: BuilderProps) {
+  const { width: w, depth: d, height: h } = f;
+  const texture = useMemo(() => {
+    if (!f.photoUrl) return null;
+    const t = new THREE.TextureLoader().load(f.photoUrl);
+    t.colorSpace = THREE.SRGBColorSpace;
+    return t;
+  }, [f.photoUrl]);
+  if (f.shape === 'round') {
+    return (
+      <mesh position={[0, h / 2, 0]} castShadow onClick={onClick}>
+        <cylinderGeometry args={[w / 2, w / 2, h, 24]} />
+        {furnMaterial(f.color, selected)}
+      </mesh>
+    );
+  }
+  return (
+    <group>
+      <mesh position={[0, h / 2, 0]} castShadow onClick={onClick}>
+        <boxGeometry args={[w, h, d]} />
+        {furnMaterial(f.color, selected)}
+      </mesh>
+      {texture && h > 0.3 && (
+        <mesh position={[0, h / 2, d / 2 + 0.006]} onClick={onClick}>
+          <planeGeometry args={[w * 0.96, h * 0.94]} />
+          <meshBasicMaterial map={texture} toneMapped={false} />
+        </mesh>
+      )}
+      {/* Plinthe pour asseoir visuellement les rangements hauts */}
+      {h > 1 && (
+        <mesh position={[0, 0.03, 0]} castShadow onClick={onClick}>
+          <boxGeometry args={[w * 0.98, 0.06, d * 0.98]} />
+          {furnMaterial(shade(f.color, 0.6), selected)}
+        </mesh>
+      )}
     </group>
   );
 }
@@ -122,49 +535,45 @@ function RoomMesh({ room, selected }: { room: Room; selected: boolean }) {
 function FurnitureMesh({ f, selected }: { f: PlacedFurniture; selected: boolean }) {
   const select = useStore((s) => s.select);
   const rot = (-f.rotation * Math.PI) / 180;
-  const isLamp = f.category === 'luminaire';
-  const emissive = selected ? '#d4a373' : '#000000';
-  const onClick = (e: { stopPropagation: () => void }) => {
+  const onClick: ClickHandler = (e) => {
     e.stopPropagation();
     select({ kind: 'furniture', id: f.id });
   };
 
+  let body: React.ReactNode;
+  if (f.shape.startsWith('stairs_')) {
+    body = <StairsMesh f={f} selected={selected} onClick={onClick} />;
+  } else if (f.category === 'luminaire') {
+    body = (
+      <>
+        <mesh position={[0, f.height / 2, 0]} castShadow onClick={onClick}>
+          <cylinderGeometry args={[0.02, 0.04, f.height, 12]} />
+          <meshStandardMaterial color="#3a3a3c" emissive={selected ? '#d4a373' : '#000000'} emissiveIntensity={0.3} />
+        </mesh>
+        <mesh position={[0, f.height * 0.9, 0]} castShadow onClick={onClick}>
+          <cylinderGeometry args={[f.width / 2, f.width / 2.6, Math.min(0.3, f.height * 0.25), 20]} />
+          <meshStandardMaterial color={f.color} emissive="#ffe9c4" emissiveIntensity={0.55} />
+        </mesh>
+        <pointLight position={[0, f.height * 0.85, 0]} intensity={4} distance={5} color="#ffe0b0" decay={2} />
+      </>
+    );
+  } else if (f.category === 'canape' || f.category === 'fauteuil') {
+    body = <SofaMesh f={f} selected={selected} onClick={onClick} />;
+  } else if (f.category === 'chaise' && f.height > 0.5) {
+    body = <ChairMesh f={f} selected={selected} onClick={onClick} />;
+  } else if (f.category === 'table' || f.category === 'table_basse' || f.category === 'bureau') {
+    body = <TableMesh f={f} selected={selected} onClick={onClick} />;
+  } else if (f.category === 'lit') {
+    body = <BedMesh f={f} selected={selected} onClick={onClick} />;
+  } else if (f.category === 'decoration' && f.shape === 'round' && f.height > 0.3) {
+    body = <PlantMesh f={f} selected={selected} onClick={onClick} />;
+  } else {
+    body = <BoxMesh f={f} selected={selected} onClick={onClick} />;
+  }
+
   return (
     <group position={[f.x, 0, f.y]} rotation={[0, rot, 0]}>
-      {isLamp ? (
-        <>
-          <mesh position={[0, f.height / 2, 0]} castShadow onClick={onClick}>
-            <cylinderGeometry args={[0.02, 0.04, f.height, 12]} />
-            <meshStandardMaterial color="#3a3a3c" emissive={emissive} emissiveIntensity={0.3} />
-          </mesh>
-          <mesh position={[0, f.height * 0.9, 0]} castShadow onClick={onClick}>
-            <cylinderGeometry args={[f.width / 2, f.width / 2.6, Math.min(0.3, f.height * 0.25), 20]} />
-            <meshStandardMaterial color={f.color} emissive="#ffe9c4" emissiveIntensity={0.55} />
-          </mesh>
-          <pointLight position={[0, f.height * 0.85, 0]} intensity={4} distance={5} color="#ffe0b0" decay={2} />
-        </>
-      ) : f.shape === 'round' ? (
-        <mesh position={[0, f.height / 2, 0]} castShadow onClick={onClick}>
-          <cylinderGeometry args={[f.width / 2, f.width / 2, f.height, 24]} />
-          <meshStandardMaterial color={f.color} roughness={0.7} emissive={emissive} emissiveIntensity={selected ? 0.25 : 0} />
-        </mesh>
-      ) : f.shape === 'lshape' ? (
-        <>
-          <mesh position={[0, f.height / 2, -f.depth * 0.225]} castShadow onClick={onClick}>
-            <boxGeometry args={[f.width, f.height, f.depth * 0.55]} />
-            <meshStandardMaterial color={f.color} roughness={0.8} emissive={emissive} emissiveIntensity={selected ? 0.25 : 0} />
-          </mesh>
-          <mesh position={[-f.width * 0.225, f.height / 2, f.depth * 0.225]} castShadow onClick={onClick}>
-            <boxGeometry args={[f.width * 0.55, f.height, f.depth * 0.45]} />
-            <meshStandardMaterial color={f.color} roughness={0.8} emissive={emissive} emissiveIntensity={selected ? 0.25 : 0} />
-          </mesh>
-        </>
-      ) : (
-        <mesh position={[0, f.height / 2, 0]} castShadow onClick={onClick}>
-          <boxGeometry args={[f.width, f.height, f.depth]} />
-          <meshStandardMaterial color={f.color} roughness={0.8} emissive={emissive} emissiveIntensity={selected ? 0.25 : 0} />
-        </mesh>
-      )}
+      {body}
     </group>
   );
 }
@@ -203,8 +612,8 @@ export default function View3D() {
           <FurnitureMesh key={f.id} f={f} selected={selection?.kind === 'furniture' && selection.id === f.id} />
         ))}
 
-        <ContactShadows position={[cx, -0.11, cz]} scale={span * 2.5} opacity={0.4} blur={2} far={4} />
-        <mesh position={[cx, -0.12, cz]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
+        <ContactShadows position={[cx, -FLOOR_T - 0.01, cz]} scale={span * 2.5} opacity={0.4} blur={2} far={4} />
+        <mesh position={[cx, -FLOOR_T - 0.02, cz]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
           <planeGeometry args={[span * 6, span * 6]} />
           <meshStandardMaterial color="#1a1d23" roughness={1} />
         </mesh>

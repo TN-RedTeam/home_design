@@ -1,16 +1,19 @@
 import { useState } from 'react';
 import { PAINT_PALETTES } from '../../data/palettes';
 import { useStore } from '../../store/useStore';
-import type { FloorMaterial, Opening, OpeningType, Room, RoomType, WallSide } from '../../types';
+import type { FloorMaterial, OpeningType, Room, RoomType } from '../../types';
 import {
   FLOOR_LABELS,
+  OPENING_DEFAULTS,
   OPENING_LABELS,
+  ROOF_WINDOW_DEFAULT,
   ROOM_TYPE_LABELS,
-  WALL_LABELS,
   formatArea,
   formatLength,
 } from '../../types';
-import { wallLength } from '../../utils/geometry';
+import { polygonCentroid } from '../../utils/geometry';
+import { polygonArea, wallLength, withEdgeLength } from '../../utils/geometry';
+
 
 /** Champ dimension : édition en cm, stockage en m. */
 function CmField({ label, value, min = 0.05, onChange }: { label: string; value: number; min?: number; onChange: (m: number) => void }) {
@@ -73,19 +76,27 @@ function PaintPicker({ value, onChange }: { value: string; onChange: (hex: strin
 function RoomProps({ room }: { room: Room }) {
   const updateRoom = useStore((s) => s.updateRoom);
   const removeRoom = useStore((s) => s.removeRoom);
+  const updateWall = useStore((s) => s.updateWall);
   const addOpening = useStore((s) => s.addOpening);
+  const addRoofWindow = useStore((s) => s.addRoofWindow);
   const select = useStore((s) => s.select);
-  const [wall, setWall] = useState<WallSide>('N');
+  const [wall, setWall] = useState(0);
+  const [openingType, setOpeningType] = useState<OpeningType>('fenetre');
 
-  const addOp = (type: OpeningType) => {
-    const defaults: Record<OpeningType, Pick<Opening, 'width' | 'height' | 'sillHeight'>> = {
-      porte: { width: 0.83, height: 2.04, sillHeight: 0 },
-      fenetre: { width: 1.2, height: 1.25, sillHeight: 0.9 },
-      porte_fenetre: { width: 2.2, height: 2.15, sillHeight: 0 },
-    };
-    const d = defaults[type];
-    const maxOff = Math.max(0, wallLength(room, wall) - d.width);
-    addOpening(room.id, { type, wall, offset: maxOff / 2, ...d });
+  const n = room.points.length;
+  const safeWall = Math.min(wall, n - 1);
+  const currentWall = room.walls[safeWall];
+
+  const addOp = () => {
+    const d = OPENING_DEFAULTS[openingType];
+    const len = wallLength(room, safeWall);
+    if (len < d.width) return;
+    addOpening(room.id, { type: openingType, wall: safeWall, offset: (len - d.width) / 2, ...d });
+  };
+
+  const addVelux = () => {
+    const c = polygonCentroid(room.points);
+    addRoofWindow(room.id, { x: c.x, y: c.y, ...ROOF_WINDOW_DEFAULT });
   };
 
   return (
@@ -106,11 +117,12 @@ function RoomProps({ room }: { room: Room }) {
         </select>
       </label>
       <div className="dims-row">
-        <CmField label="Largeur (cm)" value={room.width} min={1} onChange={(v) => updateRoom(room.id, { width: v })} />
-        <CmField label="Prof. (cm)" value={room.length} min={1} onChange={(v) => updateRoom(room.id, { length: v })} />
-        <CmField label="H. plafond" value={room.height} min={1.8} onChange={(v) => updateRoom(room.id, { height: v })} />
+        <CmField label="H. plafond (cm)" value={room.height} min={1.8} onChange={(v) => updateRoom(room.id, { height: v })} />
       </div>
-      <p className="hint">Surface : {formatArea(room.width * room.length)}</p>
+      <p className="hint">
+        Surface : {formatArea(polygonArea(room.points))} · {n} murs. Sur le plan, glissez les sommets pour
+        modifier la forme ; le bouton ◈ au milieu d'un mur le scinde en deux.
+      </p>
       <label>
         Sol
         <select value={room.floor} onChange={(e) => updateRoom(room.id, { floor: e.target.value as FloorMaterial })}>
@@ -122,49 +134,135 @@ function RoomProps({ room }: { room: Room }) {
         </select>
       </label>
 
-      <h3>Peinture des murs</h3>
-      <div className="wall-tabs">
-        {(['N', 'S', 'E', 'W'] as WallSide[]).map((w) => (
-          <button key={w} className={wall === w ? 'active' : ''} style={{ borderBottomColor: room.wallColors[w] }} onClick={() => setWall(w)}>
-            {w}
+      <h3>Murs</h3>
+      <div className="wall-tabs wall-tabs-wrap">
+        {room.walls.map((w, i) => (
+          <button
+            key={i}
+            className={safeWall === i ? 'active' : ''}
+            style={{ borderBottomColor: w.open ? 'transparent' : w.color }}
+            onClick={() => setWall(i)}
+            title={w.open ? 'Mur ouvert' : `Mur ${i + 1}`}
+          >
+            {w.open ? `${i + 1}○` : i + 1}
           </button>
         ))}
       </div>
-      <p className="hint">{WALL_LABELS[wall]} — {formatLength(wallLength(room, wall))}</p>
-      <PaintPicker
-        value={room.wallColors[wall]}
-        onChange={(hex) => updateRoom(room.id, { wallColors: { ...room.wallColors, [wall]: hex } })}
-      />
-      <button
-        className="btn btn-block"
-        onClick={() =>
-          updateRoom(room.id, { wallColors: { N: room.wallColors[wall], S: room.wallColors[wall], E: room.wallColors[wall], W: room.wallColors[wall] } })
-        }
-      >
-        Appliquer cette couleur aux 4 murs
-      </button>
+      <div className="dims-row">
+        <label>
+          Longueur (cm)
+          <input
+            type="number"
+            value={Math.round(wallLength(room, safeWall) * 100)}
+            min={20}
+            step={1}
+            onChange={(e) => {
+              const cm = parseFloat(e.target.value);
+              if (Number.isFinite(cm) && cm >= 20) {
+                updateRoom(room.id, { points: withEdgeLength(room.points, safeWall, cm / 100) });
+              }
+            }}
+          />
+        </label>
+        <label className="check-row wall-open-toggle">
+          <input
+            type="checkbox"
+            checked={currentWall?.open ?? false}
+            onChange={(e) => updateWall(room.id, safeWall, { open: e.target.checked })}
+          />
+          Mur ouvert
+        </label>
+      </div>
+      {currentWall?.open ? (
+        <p className="hint">
+          Espace ouvert : aucun mur n'est construit sur ce côté (cuisine ouverte, séjour traversant…).
+        </p>
+      ) : (
+        <>
+          <PaintPicker
+            value={currentWall?.color ?? '#f4f1ea'}
+            onChange={(hex) => updateWall(room.id, safeWall, { color: hex })}
+          />
+          <button
+            className="btn btn-block"
+            onClick={() =>
+              updateRoom(room.id, {
+                walls: room.walls.map((w) => (w.open ? w : { ...w, color: currentWall?.color ?? w.color })),
+              })
+            }
+          >
+            Appliquer cette couleur à tous les murs
+          </button>
+        </>
+      )}
 
       <h3>Portes & fenêtres</h3>
       <div className="add-opening">
-        <button className="btn btn-sm" onClick={() => addOp('porte')}>+ Porte</button>
-        <button className="btn btn-sm" onClick={() => addOp('fenetre')}>+ Fenêtre</button>
-        <button className="btn btn-sm" onClick={() => addOp('porte_fenetre')}>+ Porte-fenêtre</button>
-        <span className="hint">sur mur {wall}</span>
+        <select value={openingType} onChange={(e) => setOpeningType(e.target.value as OpeningType)}>
+          {(Object.keys(OPENING_LABELS) as OpeningType[]).map((t) => (
+            <option key={t} value={t}>
+              {OPENING_LABELS[t]} ({Math.round(OPENING_DEFAULTS[t].width * 100)} cm)
+            </option>
+          ))}
+        </select>
+        <button className="btn btn-sm btn-accent" onClick={addOp} disabled={currentWall?.open}>
+          + Ajouter sur mur {safeWall + 1}
+        </button>
       </div>
       <ul className="opening-list">
         {room.openings.map((o) => (
           <li key={o.id}>
             <button className="link" onClick={() => select({ kind: 'opening', roomId: room.id, id: o.id })}>
-              {OPENING_LABELS[o.type]} · mur {o.wall} · {formatLength(o.width)}
+              {OPENING_LABELS[o.type]} · mur {o.wall + 1} · {formatLength(o.width)}
             </button>
           </li>
         ))}
         {room.openings.length === 0 && <li className="hint">Aucune ouverture.</li>}
       </ul>
 
+      <h3>Fenêtres de toit</h3>
+      <div className="add-opening">
+        <button className="btn btn-sm" onClick={addVelux}>+ Ajouter un Velux</button>
+        <span className="hint">{Math.round(ROOF_WINDOW_DEFAULT.width * 100)} × {Math.round(ROOF_WINDOW_DEFAULT.length * 100)} cm</span>
+      </div>
+      <ul className="opening-list">
+        {room.roofWindows.map((rw) => (
+          <li key={rw.id}>
+            <button className="link" onClick={() => select({ kind: 'roofWindow', roomId: room.id, id: rw.id })}>
+              Velux · {formatLength(rw.width)} × {formatLength(rw.length)}
+            </button>
+          </li>
+        ))}
+        {room.roofWindows.length === 0 && <li className="hint">Aucune fenêtre de toit.</li>}
+      </ul>
+
       <button className="btn btn-danger btn-block" onClick={() => removeRoom(room.id)}>
         Supprimer la pièce
       </button>
+    </>
+  );
+}
+
+function RoofWindowProps({ roomId, roofWindowId }: { roomId: string; roofWindowId: string }) {
+  const room = useStore((s) => s.project.rooms.find((r) => r.id === roomId));
+  const updateRoofWindow = useStore((s) => s.updateRoofWindow);
+  const removeRoofWindow = useStore((s) => s.removeRoofWindow);
+  const select = useStore((s) => s.select);
+  const rw = room?.roofWindows.find((x) => x.id === roofWindowId);
+  if (!room || !rw) return null;
+  return (
+    <>
+      <h2>Fenêtre de toit (Velux)</h2>
+      <p className="hint">{room.name} — glissez-la sur le plan pour la positionner sous la pente.</p>
+      <div className="dims-row">
+        <CmField label="Largeur (cm)" value={rw.width} min={0.4} onChange={(v) => updateRoofWindow(roomId, rw.id, { width: v })} />
+        <CmField label="Longueur (cm)" value={rw.length} min={0.4} onChange={(v) => updateRoofWindow(roomId, rw.id, { length: v })} />
+      </div>
+      <p className="hint">
+        Formats courants : 55 × 78, 78 × 98, 78 × 118, 114 × 118 cm.
+      </p>
+      <button className="btn btn-block" onClick={() => select({ kind: 'room', id: roomId })}>← Retour à la pièce</button>
+      <button className="btn btn-danger btn-block" onClick={() => removeRoofWindow(roomId, rw.id)}>Supprimer</button>
     </>
   );
 }
@@ -180,12 +278,16 @@ function OpeningProps({ roomId, openingId }: { roomId: string; openingId: string
   return (
     <>
       <h2>{OPENING_LABELS[o.type]}</h2>
-      <p className="hint">{room.name} — {WALL_LABELS[o.wall]}</p>
+      <p className="hint">
+        {room.name} — mur {o.wall + 1} ({formatLength(wallLength(room, o.wall))})
+      </p>
       <label>
         Mur
-        <select value={o.wall} onChange={(e) => updateOpening(roomId, o.id, { wall: e.target.value as WallSide, offset: 0 })}>
-          {(['N', 'S', 'E', 'W'] as WallSide[]).map((w) => (
-            <option key={w} value={w}>{WALL_LABELS[w]}</option>
+        <select value={o.wall} onChange={(e) => updateOpening(roomId, o.id, { wall: Number(e.target.value), offset: 0 })}>
+          {room.walls.map((w, i) => (
+            <option key={i} value={i} disabled={w.open}>
+              Mur {i + 1} · {formatLength(wallLength(room, i))}{w.open ? ' (ouvert)' : ''}
+            </option>
           ))}
         </select>
       </label>
@@ -279,6 +381,7 @@ export default function PropertiesPanel() {
         return room ? <RoomProps room={room} /> : null;
       })()}
       {selection?.kind === 'opening' && <OpeningProps roomId={selection.roomId} openingId={selection.id} />}
+      {selection?.kind === 'roofWindow' && <RoofWindowProps roomId={selection.roomId} roofWindowId={selection.id} />}
       {selection?.kind === 'furniture' && <FurnitureProps id={selection.id} />}
       {!selection && (
         <>
@@ -290,7 +393,7 @@ export default function PropertiesPanel() {
           <h3>Le projet</h3>
           <p className="hint">
             {project.rooms.length} pièce(s) · {project.furniture.length} meuble(s) ·{' '}
-            {formatArea(project.rooms.reduce((acc, r) => acc + r.width * r.length, 0))} au total
+            {formatArea(project.rooms.reduce((acc, r) => acc + polygonArea(r.points), 0))} au total
           </p>
         </>
       )}

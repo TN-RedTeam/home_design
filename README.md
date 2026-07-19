@@ -7,15 +7,22 @@ et visualisez le résultat en 3D — avant d'acheter ou de repeindre quoi que ce
 ## Fonctionnalités
 
 ### 🗺️ Plan 2D coté
-- Dessin de pièces à la souris avec dimensions réelles (largeur, profondeur, hauteur sous plafond)
-- Cotes affichées en mètres/centimètres, surface calculée par pièce et pour le projet
-- Portes, fenêtres et portes-fenêtres positionnables sur chaque mur (largeur, hauteur, allège)
+- Pièces **polygonales libres** : rectangle rapide ou forme libre point par point (murs en L,
+  couloirs, sous-pentes) ; glissez les sommets, scindez un mur (◈), supprimez un sommet (double-clic)
+- **Murs ouverts** : marquez n'importe quel côté comme « ouvert » (cuisine américaine, séjour
+  traversant) — pointillés en 2D, aucun mur construit en 3D
+- Cotes par mur en mètres/centimètres (longueur éditable au cm), surface calculée par pièce
+- 5 types d'ouvertures : porte, **porte d'entrée**, fenêtre, **double fenêtre**, porte-fenêtre
+  (largeur, hauteur, allège), plus **fenêtres de toit (Velux)** posées sur le plafond
 - Grille avec accrochage 5 cm, outil de mesure, zoom/panoramique
-- Raccourcis : `R` pivoter, `D` dupliquer, `Suppr` supprimer, `Échap` désélectionner
+- Raccourcis : `R` pivoter, `D` dupliquer, `Suppr` supprimer, `Échap` désélectionner, `Entrée`
+  fermer le polygone en cours
 
 ### 🛋️ Ameublement aux vraies dimensions
 - Catalogue de ~50 meubles avec dimensions réelles du marché (canapés, lits, rangements,
   luminaires, électroménager, salle de bain…)
+- **4 types d'escaliers** comparables (droit, 1/4 tournant, 2/4 tournant, colimaçon) avec leurs
+  emprises au sol réelles — marches et sens de montée dessinés sur le plan, volumes 3D à marches
 - Distinction meubles **existants** (relevés chez vous, en pointillés) / **projets d'achat**
 - **Produit du web** : repérez un meuble ou luminaire sur un site marchand, reportez ses dimensions
   et sa photo depuis la fiche produit, et testez-le immédiatement sur votre plan
@@ -27,18 +34,24 @@ et visualisez le résultat en 3D — avant d'acheter ou de repeindre quoi que ce
 - 7 matériaux de sol (parquets, carrelages, béton ciré, tomettes…)
 
 ### 🏠 Vue 3D temps réel
-- Murs extrudés à la vraie hauteur avec ouvertures percées (linteaux, allèges, vitrages)
-- Meubles volumétriques, luminaires avec éclairage simulé
-- Orbite / zoom à la souris, couleurs de murs et sols synchronisées avec le plan
+- Sols polygonaux extrudés, murs à la vraie hauteur avec ouvertures percées (linteaux, allèges,
+  vitrages, vantaux de portes, meneaux de doubles fenêtres), verrières de toit lumineuses
+- **Meubles procéduraux reconnaissables** : canapés avec assise/dossier/accoudoirs, lits avec
+  matelas et tête de lit, tables sur pieds, chaises, plantes, escaliers à marches — les photos
+  produit s'affichent sur la face avant des rangements
+- Luminaires avec éclairage simulé, orbite/zoom à la souris, couleurs synchronisées avec le plan
 
-### 📸 Studio Photo — repeindre sans pinceau
+### 📸 Studio Photo — repeindre et meubler sans travaux
 - Importez une photo de votre pièce, peignez au pinceau les zones de mur à tester
 - Le rendu **préserve les ombres et la texture** du mur (mélange teinte/saturation + assombrissement)
+- **Incrustation d'objets en perspective** : projetez la photo d'un meuble (importée d'un site
+  marchand ou reprise d'un « produit du web ») sur la photo de votre pièce en ajustant ses 4 coins ;
+  opacité et mode « Multiplier » pour intégrer les visuels sur fond blanc, ordre des calques
 - Palettes déco, intensité réglable, gomme, export PNG du rendu pour comparer
 
 ### 💾 Projet
 - Sauvegarde automatique dans le navigateur (localStorage)
-- Export / import du projet complet en JSON
+- Export / import du projet complet en JSON, avec migration automatique des anciens formats
 
 ## Démarrage
 
@@ -63,15 +76,17 @@ Toutes les dimensions internes sont en **mètres** ; l'interface édite en centi
 
 ```
 src/
-├── types.ts                    # Modèle de domaine (pièces, murs, ouvertures, meubles, photos)
-├── store/useStore.ts           # Store Zustand + persistance
-├── utils/geometry.ts           # Accrochage, segments d'ouvertures, bornes du plan
+├── types.ts                    # Modèle de domaine (pièces polygonales, murs, ouvertures, meubles, photos)
+├── store/useStore.ts           # Store Zustand + persistance + migrations + édition de sommets
+├── utils/
+│   ├── geometry.ts             # Polygones (aire, centroïde), murs, accrochage, ouvertures
+│   └── homography.ts           # Projection perspective (incrustation photo)
 ├── data/
-│   ├── catalog.ts              # Catalogue de meubles (dimensions réelles)
+│   ├── catalog.ts              # Catalogue de meubles et escaliers (dimensions réelles)
 │   └── palettes.ts             # Palettes de peinture professionnelles
 └── components/
-    ├── plan/FloorPlanEditor    # Éditeur 2D SVG (pièces, cotes, ouvertures, meubles)
-    ├── three/View3D            # Scène 3D (murs percés, meubles, lumières)
-    ├── photo/PhotoStudio       # Repeinture virtuelle sur photo
+    ├── plan/FloorPlanEditor    # Éditeur 2D SVG (polygones, cotes, ouvertures, Velux, escaliers)
+    ├── three/View3D            # Scène 3D (murs percés, meubles procéduraux, verrières)
+    ├── photo/PhotoStudio       # Repeinture virtuelle + objets en perspective sur photo
     └── panels/                 # Catalogue + propriétés contextuelles
 ```

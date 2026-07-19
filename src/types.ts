@@ -3,6 +3,11 @@
 
 export type ID = string;
 
+export interface Vec2 {
+  x: number;
+  y: number;
+}
+
 export type RoomType =
   | 'salon'
   | 'cuisine'
@@ -34,30 +39,32 @@ export const ROOM_TYPE_LABELS: Record<RoomType, string> = {
   autre: 'Autre',
 };
 
-/** Mur d'une pièce rectangulaire, identifié par son orientation. */
-export type WallSide = 'N' | 'S' | 'E' | 'W';
-
-export const WALL_LABELS: Record<WallSide, string> = {
-  N: 'Mur Nord (haut)',
-  S: 'Mur Sud (bas)',
-  E: 'Mur Est (droite)',
-  W: 'Mur Ouest (gauche)',
-};
-
-export type OpeningType = 'porte' | 'fenetre' | 'porte_fenetre';
+export type OpeningType = 'porte' | 'porte_entree' | 'fenetre' | 'double_fenetre' | 'porte_fenetre';
 
 export const OPENING_LABELS: Record<OpeningType, string> = {
   porte: 'Porte',
+  porte_entree: "Porte d'entrée",
   fenetre: 'Fenêtre',
+  double_fenetre: 'Double fenêtre',
   porte_fenetre: 'Porte-fenêtre',
 };
 
-/** Ouverture (porte / fenêtre) positionnée sur un mur. */
+/** Dimensions standard proposées à la création d'une ouverture. */
+export const OPENING_DEFAULTS: Record<OpeningType, { width: number; height: number; sillHeight: number }> = {
+  porte: { width: 0.83, height: 2.04, sillHeight: 0 },
+  porte_entree: { width: 0.9, height: 2.15, sillHeight: 0 },
+  fenetre: { width: 1.2, height: 1.25, sillHeight: 0.9 },
+  double_fenetre: { width: 1.4, height: 1.35, sillHeight: 0.9 },
+  porte_fenetre: { width: 2.2, height: 2.15, sillHeight: 0 },
+};
+
+/** Ouverture (porte / fenêtre) positionnée sur un mur (arête du polygone). */
 export interface Opening {
   id: ID;
   type: OpeningType;
-  wall: WallSide;
-  /** Distance en m entre le début du mur et le bord gauche de l'ouverture. */
+  /** Index du mur porteur : arête points[wall] -> points[(wall+1) % n]. */
+  wall: number;
+  /** Distance en m entre le début du mur et le bord de l'ouverture. */
   offset: number;
   /** Largeur de l'ouverture en m. */
   width: number;
@@ -66,6 +73,26 @@ export interface Opening {
   /** Hauteur d'allège (bas de fenêtre) en m — 0 pour une porte. */
   sillHeight: number;
 }
+
+/** Mur = arête du polygone de la pièce. `open` = absence de mur (espace ouvert). */
+export interface RoomWall {
+  color: string;
+  open: boolean;
+}
+
+/** Fenêtre de toit (Velux) posée sur le plafond d'une pièce. (x, y) = centre, repère du plan. */
+export interface RoofWindow {
+  id: ID;
+  x: number;
+  y: number;
+  /** Largeur (axe X) en m. */
+  width: number;
+  /** Longueur (axe Y) en m. */
+  length: number;
+}
+
+/** Dimensions standard d'une fenêtre de toit (Velux MK04). */
+export const ROOF_WINDOW_DEFAULT = { width: 0.78, length: 0.98 };
 
 export type FloorMaterial =
   | 'parquet_chene'
@@ -97,25 +124,22 @@ export const FLOOR_COLORS: Record<FloorMaterial, string> = {
 };
 
 /**
- * Pièce rectangulaire positionnée sur le plan global.
- * (x, y) = coin haut-gauche dans le repère du plan, en mètres.
+ * Pièce polygonale. `points` : sommets ordonnés (sens horaire) dans le repère
+ * du plan, en mètres. Le mur i relie points[i] à points[(i+1) % n] ;
+ * `walls` a exactement la même longueur que `points`.
  */
 export interface Room {
   id: ID;
   name: string;
   type: RoomType;
-  x: number;
-  y: number;
-  /** Largeur intérieure (axe X) en m. */
-  width: number;
-  /** Profondeur intérieure (axe Y) en m. */
-  length: number;
+  points: Vec2[];
+  walls: RoomWall[];
   /** Hauteur sous plafond en m. */
   height: number;
-  /** Couleur de peinture par mur. */
-  wallColors: Record<WallSide, string>;
   floor: FloorMaterial;
   openings: Opening[];
+  /** Fenêtres de toit (Velux). */
+  roofWindows: RoofWindow[];
 }
 
 export type FurnitureCategory =
@@ -131,6 +155,7 @@ export type FurnitureCategory =
   | 'electromenager'
   | 'decoration'
   | 'salle_de_bain'
+  | 'escalier'
   | 'exterieur';
 
 export const CATEGORY_LABELS: Record<FurnitureCategory, string> = {
@@ -146,11 +171,22 @@ export const CATEGORY_LABELS: Record<FurnitureCategory, string> = {
   electromenager: 'Électroménager',
   decoration: 'Décoration',
   salle_de_bain: 'Salle de bain',
+  escalier: 'Escaliers',
   exterieur: 'Extérieur',
 };
 
-/** Forme vue de dessus pour le rendu 2D / 3D. */
-export type FurnitureShape = 'rect' | 'round' | 'lshape';
+/**
+ * Forme vue de dessus pour le rendu 2D / 3D.
+ * Les formes `stairs_*` déclenchent un rendu spécifique (marches, sens de montée).
+ */
+export type FurnitureShape =
+  | 'rect'
+  | 'round'
+  | 'lshape'
+  | 'stairs_droit'
+  | 'stairs_quart'
+  | 'stairs_demi'
+  | 'stairs_colimacon';
 
 /** Article du catalogue de meubles (dimensions constructeur). */
 export interface CatalogItem {
@@ -196,14 +232,34 @@ export interface PlacedFurniture {
 /** Zone de peinture appliquée sur une photo (module Studio Photo). */
 export interface PhotoPaintStroke {
   /** Points du tracé en coordonnées normalisées [0..1] de l'image. */
-  points: { x: number; y: number }[];
+  points: Vec2[];
   /** Rayon du pinceau normalisé par rapport à la largeur de l'image. */
   radius: number;
   /** true = gomme (efface le masque). */
   erase: boolean;
 }
 
-/** Photo d'une pièce avec ses retouches de peinture virtuelle. */
+/**
+ * Objet (meuble, luminaire…) incrusté dans une photo avec mise en
+ * perspective : l'image est projetée sur le quadrilatère `quad`.
+ */
+export interface PhotoOverlay {
+  id: ID;
+  name: string;
+  /** Image de l'objet (dataURL). */
+  imageUrl: string;
+  /**
+   * Quatre coins en coordonnées normalisées [0..1] de la photo, dans
+   * l'ordre : haut-gauche, haut-droit, bas-droit, bas-gauche.
+   */
+  quad: [Vec2, Vec2, Vec2, Vec2];
+  /** Opacité [0..1]. */
+  opacity: number;
+  /** 'multiply' aide à intégrer les photos produit sur fond blanc. */
+  blend: 'normal' | 'multiply';
+}
+
+/** Photo d'une pièce avec ses retouches de peinture virtuelle et ses objets incrustés. */
 export interface RoomPhoto {
   id: ID;
   roomId?: ID;
@@ -215,6 +271,8 @@ export interface RoomPhoto {
   /** Intensité du mélange [0..1]. */
   paintOpacity: number;
   strokes: PhotoPaintStroke[];
+  /** Objets incrustés en perspective, dessinés du premier (fond) au dernier (devant). */
+  overlays: PhotoOverlay[];
   createdAt: number;
 }
 
@@ -227,7 +285,7 @@ export interface Project {
   updatedAt: number;
 }
 
-export type EditorTool = 'select' | 'addRoom' | 'measure';
+export type EditorTool = 'select' | 'addRoom' | 'addPoly' | 'measure';
 export type ViewMode = 'plan' | '3d' | 'photo';
 
 export interface PaintColor {

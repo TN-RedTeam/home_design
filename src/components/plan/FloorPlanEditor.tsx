@@ -3,8 +3,10 @@ import { resolveActiveFloor, useStore } from '../../store/useStore';
 import type { Opening, PlacedFurniture, Room, Vec2 } from '../../types';
 import { FLOOR_COLORS, formatArea, formatLength } from '../../types';
 import {
+  checkPlacement,
   clamp,
   dist,
+  furnitureCorners,
   openingSegment,
   planBounds,
   polygonArea,
@@ -60,19 +62,18 @@ export default function FloorPlanEditor() {
   const setTool = useStore((s) => s.setTool);
   const addRoom = useStore((s) => s.addRoom);
   const updateRoom = useStore((s) => s.updateRoom);
-  const removeRoom = useStore((s) => s.removeRoom);
   const insertVertex = useStore((s) => s.insertVertex);
   const removeVertex = useStore((s) => s.removeVertex);
   const updateFurniture = useStore((s) => s.updateFurniture);
-  const removeFurniture = useStore((s) => s.removeFurniture);
-  const duplicateFurniture = useStore((s) => s.duplicateFurniture);
   const updateOpening = useStore((s) => s.updateOpening);
-  const removeOpening = useStore((s) => s.removeOpening);
   const updateRoofWindow = useStore((s) => s.updateRoofWindow);
-  const removeRoofWindow = useStore((s) => s.removeRoofWindow);
   const activeFloorId = useStore((s) => s.activeFloorId);
   const setActiveFloor = useStore((s) => s.setActiveFloor);
   const addFloor = useStore((s) => s.addFloor);
+  const placement = useStore((s) => s.placement);
+  const placementRotation = useStore((s) => s.placementRotation);
+  const dropPlacement = useStore((s) => s.dropPlacement);
+  const [ghostPos, setGhostPos] = useState<Vec2 | null>(null);
 
   const activeFloor = resolveActiveFloor(project, activeFloorId);
   const floorsSorted = [...project.floors].sort((a, b) => a.level - b.level);
@@ -160,6 +161,11 @@ export default function FloorPlanEditor() {
   const onBackgroundDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
     const w = toWorld(e.clientX, e.clientY);
+    if (placement) {
+      dropPlacement(snapTo(w.x, snap), snapTo(w.y, snap));
+      setGhostPos(null);
+      return;
+    }
     if (tool === 'addPoly') {
       const p = { x: snapTo(w.x, snap), y: snapTo(w.y, snap) };
       const pts = polyRef.current;
@@ -183,6 +189,9 @@ export default function FloorPlanEditor() {
 
   const onMove = (e: React.PointerEvent) => {
     const w = toWorld(e.clientX, e.clientY);
+    if (placement) {
+      setGhostPos({ x: snapTo(w.x, snap), y: snapTo(w.y, snap) });
+    }
     if (tool === 'addPoly') {
       setPolyCursor({ x: snapTo(w.x, snap), y: snapTo(w.y, snap) });
     }
@@ -273,24 +282,15 @@ export default function FloorPlanEditor() {
         }
         return;
       }
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selection) {
-        if (selection.kind === 'room') removeRoom(selection.id);
-        if (selection.kind === 'furniture') removeFurniture(selection.id);
-        if (selection.kind === 'opening') removeOpening(selection.roomId, selection.id);
-        if (selection.kind === 'roofWindow') removeRoofWindow(selection.roomId, selection.id);
-      }
-      if (selection?.kind === 'furniture') {
-        const f = project.furniture.find((x) => x.id === selection.id);
-        if (!f) return;
-        if (e.key === 'r' || e.key === 'R') updateFurniture(f.id, { rotation: (f.rotation + 15) % 360 });
-        if (e.key === 'd' || e.key === 'D') duplicateFurniture(f.id);
-      }
+      // Suppression, rotation, duplication et annuler/refaire sont gérés
+      // globalement dans App.tsx (valables aussi en vue 3D).
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selection, project, tool, select, removeRoom, removeFurniture, removeOpening, removeRoofWindow, updateFurniture, duplicateFurniture, closePolyDraft]);
+  }, [selection, tool, select, closePolyDraft]);
 
   const startRoomDrag = (e: React.PointerEvent, room: Room) => {
+    if (placement) return; // laisse le clic remonter jusqu'au fond : pose du meuble
     if (tool !== 'select' || e.button !== 0) return;
     e.stopPropagation();
     svgRef.current!.setPointerCapture(e.pointerId);
@@ -300,6 +300,7 @@ export default function FloorPlanEditor() {
   };
 
   const startFurnitureDrag = (e: React.PointerEvent, f: PlacedFurniture) => {
+    if (placement) return;
     if (tool !== 'select' || e.button !== 0) return;
     e.stopPropagation();
     svgRef.current!.setPointerCapture(e.pointerId);
@@ -685,7 +686,7 @@ export default function FloorPlanEditor() {
     <div className="plan-editor">
       <svg
         ref={svgRef}
-        className={`plan-svg tool-${tool}`}
+        className={`plan-svg tool-${tool} ${placement ? 'placing' : ''}`}
         onWheel={onWheel}
         onPointerDown={onBackgroundDown}
         onPointerMove={onMove}
@@ -761,6 +762,54 @@ export default function FloorPlanEditor() {
             )}
           </g>
         )}
+
+        {/* Fantôme du meuble accroché au curseur, teinté selon la validité de l'emplacement */}
+        {placement && ghostPos && (() => {
+          const cand = {
+            x: ghostPos.x,
+            y: ghostPos.y,
+            width: placement.width,
+            depth: placement.depth,
+            rotation: placementRotation,
+            height: placement.height,
+          };
+          const check = checkPlacement(project.rooms, project.furniture, activeFloor.id, cand);
+          const corners = furnitureCorners(cand);
+          const cx = X(ghostPos.x);
+          const cy = Y(ghostPos.y);
+          return (
+            <g className={`ghost-furniture ${check.valid ? 'valid' : 'invalid'}`} pointerEvents="none">
+              <polygon points={corners.map((p) => `${X(p.x)},${Y(p.y)}`).join(' ')} className="ghost-footprint" />
+              <g transform={`rotate(${placementRotation} ${cx} ${cy})`}>
+                {placement.shape === 'round' ? (
+                  <ellipse cx={cx} cy={cy} rx={px(placement.width) / 2} ry={px(placement.depth) / 2} className="ghost-shape" />
+                ) : (
+                  <rect
+                    x={cx - px(placement.width) / 2}
+                    y={cy - px(placement.depth) / 2}
+                    width={px(placement.width)}
+                    height={px(placement.depth)}
+                    rx={3}
+                    className="ghost-shape"
+                  />
+                )}
+              </g>
+              <text x={cx} y={cy} className="furn-label" textAnchor="middle" dominantBaseline="middle">
+                {placement.name}
+              </text>
+              {!check.inRoom && (
+                <text x={cx} y={cy + px(placement.depth) / 2 + 16} className="ghost-warn" textAnchor="middle">
+                  Hors pièce
+                </text>
+              )}
+              {check.collides && (
+                <text x={cx} y={cy + px(placement.depth) / 2 + 16} className="ghost-warn" textAnchor="middle">
+                  Chevauche un meuble
+                </text>
+              )}
+            </g>
+          );
+        })()}
 
         {drag?.mode === 'measure' && (
           <g className="measure">

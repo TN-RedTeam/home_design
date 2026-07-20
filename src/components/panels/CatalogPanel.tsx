@@ -4,17 +4,6 @@ import { useStore } from '../../store/useStore';
 import type { CatalogItem, FurnitureCategory, FurnitureShape } from '../../types';
 import { CATEGORY_LABELS, formatLength } from '../../types';
 import { removeBackground } from '../../utils/cutout';
-import { polygonCentroid } from '../../utils/geometry';
-
-/** Centre de placement : pièce sélectionnée, sinon première pièce, sinon origine. */
-function usePlacementCenter() {
-  const project = useStore((s) => s.project);
-  const selection = useStore((s) => s.selection);
-  const room =
-    (selection?.kind === 'room' && project.rooms.find((r) => r.id === selection.id)) ||
-    project.rooms[0];
-  return room ? polygonCentroid(room.points) : { x: 2, y: 2 };
-}
 
 function readImageAsDataUrl(file: File, maxW = 600): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -63,8 +52,8 @@ const EMPTY_FORM: WebForm = {
 };
 
 export default function CatalogPanel() {
-  const addFurniture = useStore((s) => s.addFurniture);
-  const center = usePlacementCenter();
+  const setPlacement = useStore((s) => s.setPlacement);
+  const placement = useStore((s) => s.placement);
   const [cat, setCat] = useState<FurnitureCategory | 'tous'>('tous');
   const [search, setSearch] = useState('');
   const [showWebForm, setShowWebForm] = useState(false);
@@ -105,15 +94,13 @@ export default function CatalogPanel() {
     );
   }, [cat, search]);
 
+  /** Accroche l'article au curseur : il se pose d'un clic sur le plan ou dans la 3D. */
   const place = (item: CatalogItem, existing = false) => {
-    addFurniture({
+    setPlacement({
       catalogId: item.id,
       name: item.name,
       category: item.category,
       shape: item.shape,
-      x: center.x,
-      y: center.y,
-      rotation: 0,
       width: item.width,
       depth: item.depth,
       height: item.height,
@@ -147,13 +134,10 @@ export default function CatalogPanel() {
       setWebError('Renseignez un nom et les trois dimensions (en cm) indiquées sur la fiche produit.');
       return;
     }
-    addFurniture({
+    setPlacement({
       name: form.name.trim(),
       category: form.category,
       shape: form.shape,
-      x: center.x,
-      y: center.y,
-      rotation: 0,
       width: w,
       depth: d,
       height: h,
@@ -325,10 +309,14 @@ export default function CatalogPanel() {
                   {item.description && <span className="desc">{item.description}</span>}
                 </div>
                 <div className="item-actions">
-                  <button className="btn btn-sm btn-accent" onClick={() => place(item)} title="Ajouter comme projet d'achat">
-                    +
+                  <button
+                    className={`btn btn-sm btn-accent ${placement?.catalogId === item.id ? 'placing' : ''}`}
+                    onClick={() => place(item)}
+                    title="Accrocher au curseur puis cliquer sur le plan ou la 3D pour poser"
+                  >
+                    {placement?.catalogId === item.id ? '…' : '+'}
                   </button>
-                  <button className="btn btn-sm" onClick={() => place(item, true)} title="Ajouter comme meuble existant">
+                  <button className="btn btn-sm" onClick={() => place(item, true)} title="Poser comme meuble existant (relevé)">
                     Existant
                   </button>
                 </div>

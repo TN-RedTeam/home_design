@@ -19,6 +19,7 @@ export default function App() {
   const project = useStore((s) => s.project);
   const renameProject = useStore((s) => s.renameProject);
   const newProject = useStore((s) => s.newProject);
+  const loadDemoProject = useStore((s) => s.loadDemoProject);
   const importProject = useStore((s) => s.importProject);
   const importRef = useRef<HTMLInputElement>(null);
   const placement = useStore((s) => s.placement);
@@ -168,12 +169,22 @@ export default function App() {
             Importer
           </button>
           <button
-            className="btn btn-sm"
+            className="btn btn-sm btn-accent"
+            title="Partir d'une feuille blanche : aucune pièce, vous concevez tout vous-même"
             onClick={() => {
-              if (confirm('Repartir d’un nouveau projet ? Le projet actuel sera remplacé (pensez à l’exporter).')) newProject();
+              if (confirm('Créer un projet vierge ? Le projet actuel sera remplacé (pensez à l’exporter).')) newProject();
             }}
           >
             Nouveau
+          </button>
+          <button
+            className="btn btn-sm"
+            title="Charger la maison d'exemple"
+            onClick={() => {
+              if (confirm('Charger le projet d’exemple ? Le projet actuel sera remplacé (pensez à l’exporter).')) loadDemoProject();
+            }}
+          >
+            Exemple
           </button>
           <input
             ref={importRef}

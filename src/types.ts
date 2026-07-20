@@ -171,6 +171,7 @@ export type FurnitureCategory =
   | 'decoration'
   | 'salle_de_bain'
   | 'escalier'
+  | 'cloison'
   | 'exterieur';
 
 export const CATEGORY_LABELS: Record<FurnitureCategory, string> = {
@@ -187,6 +188,7 @@ export const CATEGORY_LABELS: Record<FurnitureCategory, string> = {
   decoration: 'Décoration',
   salle_de_bain: 'Salle de bain',
   escalier: 'Escaliers',
+  cloison: 'Cloisons & séparations',
   exterieur: 'Extérieur',
 };
 

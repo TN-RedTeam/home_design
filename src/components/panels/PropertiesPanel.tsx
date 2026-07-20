@@ -392,24 +392,25 @@ function FurnitureProps({ id }: { id: string }) {
         <CmField label="Prof. (cm)" value={f.depth} onChange={(v) => updateFurniture(f.id, { depth: v })} />
         <CmField label="Haut. (cm)" value={f.height} onChange={(v) => updateFurniture(f.id, { height: v })} />
       </div>
-      <div className="dims-row">
-        <label>
-          Rotation (°)
-          <input
-            type="number"
-            value={Math.round(f.rotation)}
-            step={15}
-            onChange={(e) => {
-              const deg = parseFloat(e.target.value);
-              if (Number.isFinite(deg)) updateFurniture(f.id, { rotation: ((deg % 360) + 360) % 360 });
-            }}
-          />
-        </label>
-        <label>
-          Couleur
-          <input type="color" value={f.color} onChange={(e) => updateFurniture(f.id, { color: e.target.value })} />
-        </label>
-      </div>
+      <label>
+        Rotation — {Math.round(f.rotation)}°
+        <div className="rotate-buttons">
+          {[-90, -15, 15, 90].map((d) => (
+            <button
+              key={d}
+              className="btn btn-sm"
+              title={`Pivoter de ${Math.abs(d)}° ${d < 0 ? 'à gauche' : 'à droite'}`}
+              onClick={() => updateFurniture(f.id, { rotation: (((f.rotation + d) % 360) + 360) % 360 })}
+            >
+              {d < 0 ? '⟲' : '⟳'} {Math.abs(d)}°
+            </button>
+          ))}
+        </div>
+      </label>
+      <label>
+        Couleur
+        <input type="color" value={f.color} onChange={(e) => updateFurniture(f.id, { color: e.target.value })} />
+      </label>
       <label className="check-row">
         <input type="checkbox" checked={f.existing} onChange={(e) => updateFurniture(f.id, { existing: e.target.checked })} />
         Meuble déjà présent chez moi

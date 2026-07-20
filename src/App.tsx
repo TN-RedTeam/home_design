@@ -25,8 +25,10 @@ export default function App() {
   const placement = useStore((s) => s.placement);
   const openingPlacement = useStore((s) => s.openingPlacement);
   const openingFlip = useStore((s) => s.openingFlip);
+  const roomPlacement = useStore((s) => s.roomPlacement);
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   // Raccourcis globaux (plan 2D et vue 3D) : rotation, duplication,
   // suppression, pose au curseur, annuler/refaire.
@@ -46,14 +48,17 @@ export default function App() {
         redoProject();
         return;
       }
-      if (e.key === 'Escape' && (s.placement || s.openingPlacement)) {
+      if (e.key === 'Escape' && (s.placement || s.openingPlacement || s.roomPlacement)) {
         if (s.placement) s.setPlacement(null);
         if (s.openingPlacement) s.setOpeningPlacement(null);
+        if (s.roomPlacement) s.setRoomPlacement(null);
         return;
       }
       if (e.key === 'r' || e.key === 'R') {
         const delta = e.shiftKey ? -15 : 15;
-        if (s.placement) {
+        if (s.roomPlacement) {
+          s.rotatePlacement(e.shiftKey ? -90 : 90);
+        } else if (s.placement) {
           s.rotatePlacement(delta);
         } else if (s.openingPlacement) {
           s.flipOpeningPlacement();
@@ -156,6 +161,9 @@ export default function App() {
         )}
         <div className="spacer" />
         <div className="project-actions">
+          <button className="btn btn-sm" onClick={() => setHelpOpen(true)} title="Guide des outils">
+            ?
+          </button>
           <button className="btn btn-sm" onClick={undoProject} title="Annuler (Ctrl+Z)">
             ↩
           </button>
@@ -206,6 +214,12 @@ export default function App() {
           le poser · <kbd>R</kbd> pivoter · <kbd>Échap</kbd> annuler
         </div>
       )}
+      {roomPlacement && (
+        <div className="placement-banner">
+          🏠 <strong>{roomPlacement.name}</strong> accrochée au curseur — cliquez sur le plan pour la poser ·{' '}
+          <kbd>R</kbd> ou molette : pivoter · <kbd>Échap</kbd> annuler · dimensions modifiables après la pose
+        </div>
+      )}
       {openingPlacement && (
         <div className="placement-banner">
           🚪 <strong>{openingPlacement === 'velux' ? 'Fenêtre de toit' : ''}</strong>
@@ -218,6 +232,55 @@ export default function App() {
             </>
           )}{' '}
           · <kbd>Échap</kbd> annuler
+        </div>
+      )}
+
+      {helpOpen && (
+        <div className="help-overlay" onClick={() => setHelpOpen(false)}>
+          <div className="help-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="help-header">
+              <h2>Guide des outils</h2>
+              <button className="btn btn-sm" onClick={() => setHelpOpen(false)}>✕ Fermer</button>
+            </div>
+            <div className="help-columns">
+              <section>
+                <h3>🏠 Créer les pièces</h3>
+                <ul>
+                  <li><strong>Pièces & couloirs</strong> (haut du catalogue) : cliquez <em>Couloir</em>, <em>En L</em>, <em>Carrée</em>… la pièce suit le curseur → molette ou <kbd>R</kbd> pour pivoter → clic pour poser. Le plus simple !</li>
+                  <li><strong>▭ Pièce</strong> (barre d'outils) : dessinez un rectangle libre en cliquant-glissant.</li>
+                  <li><strong>✏ Murs</strong> : tracez mur par mur (cotes en direct, angles 45°), Entrée pour fermer. Touche <kbd>O</kbd> : le segment devient une <strong>ouverture</strong> — laissez un passage puis reprenez le mur plus loin.</li>
+                  <li>Pièce sélectionnée : glissez les <strong>poignées rondes</strong> pour déformer, <strong>◈</strong> scinde un mur, double-clic sur un sommet le supprime.</li>
+                </ul>
+                <h3>🧱 Murs & cloisons</h3>
+                <ul>
+                  <li>Cliquez un mur (2D ou 3D) puis <kbd>Suppr</kbd> : la section disparaît (espace ouvert). Reconstruction en 1 clic dans le panneau droit.</li>
+                  <li>Pour une séparation légère : catalogue → <strong>Cloisons & séparations</strong> (cloison, verrière, claustra) — se pose et pivote comme un meuble.</li>
+                  <li>Peinture : sélectionnez un mur ou une pièce → palettes dans le panneau droit.</li>
+                </ul>
+              </section>
+              <section>
+                <h3>🚪 Portes & fenêtres</h3>
+                <ul>
+                  <li>Palette <strong>Menuiseries</strong> (catalogue) : cliquez un type, glissez le long d'un mur (cotes affichées), clic pour poser.</li>
+                  <li><kbd>R</kbd> inverse le sens d'une porte, avant ou après la pose.</li>
+                  <li>Le <strong>Velux</strong> se pose d'un clic à l'intérieur d'une pièce.</li>
+                </ul>
+                <h3>🛋️ Meubles & escaliers</h3>
+                <ul>
+                  <li>Catalogue → <strong>+</strong> : l'objet suit le curseur (empreinte verte = OK, rouge = collision) → clic pour poser, en 2D comme en 3D.</li>
+                  <li><strong>Pivoter</strong> : molette ou <kbd>R</kbd> pendant la pose · objet sélectionné : <kbd>R</kbd>, la poignée ronde au-dessus (2D), ou les boutons ⟲ ⟳ du panneau droit.</li>
+                  <li><kbd>D</kbd> duplique · <kbd>Suppr</kbd> supprime · glissez pour déplacer (2D et 3D).</li>
+                  <li>Un escalier posé crée sa <strong>trémie</strong> en pointillés à l'étage supérieur.</li>
+                </ul>
+                <h3>⌨️ Navigation & divers</h3>
+                <ul>
+                  <li>3D : glisser = orbiter · flèches = déplacer · <kbd>Q</kbd>/<kbd>E</kbd> pivoter · murs Auto/Hauts/Muret.</li>
+                  <li><kbd>Ctrl+Z</kbd> annuler · <kbd>Ctrl+Y</kbd> refaire · <kbd>Échap</kbd> annule la pose en cours.</li>
+                  <li>Boutons <strong>⟨ ⟩</strong> sur les bords : masquer catalogue / propriétés.</li>
+                </ul>
+              </section>
+            </div>
+          </div>
         </div>
       )}
 

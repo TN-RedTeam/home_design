@@ -709,6 +709,7 @@ export default function View3D() {
   const setShowAll = useStore((s) => s.setShow3DAllFloors);
   const placement = useStore((s) => s.placement);
   const placementRotation = useStore((s) => s.placementRotation);
+  const rotatePlacement = useStore((s) => s.rotatePlacement);
   const dropPlacement = useStore((s) => s.dropPlacement);
   const updateFurniture = useStore((s) => s.updateFurniture);
   const snap = useStore((s) => s.snap);
@@ -791,7 +792,13 @@ export default function View3D() {
   };
 
   return (
-    <div style={{ flex: 1, minWidth: 0, background: '#111318', position: 'relative' }}>
+    <div
+      style={{ flex: 1, minWidth: 0, background: '#111318', position: 'relative' }}
+      onWheel={(e) => {
+        // Pendant une pose : la molette pivote l'objet (le zoom caméra est suspendu).
+        if (placement) rotatePlacement(e.deltaY > 0 ? 15 : -15);
+      }}
+    >
       <div className="floor-switcher view3d-switcher">
         <button className={showAll ? 'active' : ''} onClick={() => setShowAll(true)}>
           Tous les niveaux
@@ -955,6 +962,7 @@ export default function View3D() {
           maxPolarAngle={Math.PI / 2.05}
           minDistance={2}
           maxDistance={span * 4}
+          enableZoom={!placement}
         />
       </Canvas>
     </div>

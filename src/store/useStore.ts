@@ -11,6 +11,7 @@ import type {
   RoofWindow,
   Room,
   RoomPhoto,
+  RoomType,
   RoomWall,
   Vec2,
   ViewMode,
@@ -238,6 +239,13 @@ export type Selection =
 /** Menuiserie accrochée au curseur, à poser sur un mur du plan ('velux' se pose sur le plafond). */
 export type OpeningPlacement = OpeningType | 'velux';
 
+/** Pièce prête à poser, accrochée au curseur (sommets centrés sur l'origine). */
+export interface RoomPreset {
+  name: string;
+  type: RoomType;
+  points: Vec2[];
+}
+
 /** Meuble « accroché au curseur » en attente de pose (mode construction). */
 export interface PlacementItem {
   catalogId?: ID;
@@ -273,6 +281,8 @@ interface AppState {
   openingPlacement: OpeningPlacement | null;
   /** Sens d'ouverture inversé pour la menuiserie en cours de pose. */
   openingFlip: boolean;
+  /** Pièce prête à poser (carrée, couloir, en L…) en cours de pose sur le plan. */
+  roomPlacement: RoomPreset | null;
   /** Affichage des murs en 3D : effacement auto côté caméra, hauts, ou muret. */
   wallsMode: WallsMode;
 
@@ -293,6 +303,9 @@ interface AppState {
   rotatePlacement: (deltaDeg: number) => void;
   setOpeningPlacement: (t: OpeningPlacement | null) => void;
   flipOpeningPlacement: () => void;
+  setRoomPlacement: (p: RoomPreset | null) => void;
+  /** Pose la pièce accrochée au curseur, centrée sur (x, y), rotation appliquée. */
+  dropRoomPlacement: (x: number, y: number) => void;
   setWallsMode: (m: WallsMode) => void;
   /** Pose le meuble accroché au curseur à la position donnée (repère du plan). */
   dropPlacement: (x: number, y: number) => void;
@@ -354,20 +367,44 @@ export const useStore = create<AppState>()(
       placementRotation: 0,
       openingPlacement: null,
       openingFlip: false,
+      roomPlacement: null,
       wallsMode: 'auto',
 
       setPlacement: (placement) =>
-        set({ placement, placementRotation: 0, selection: null, openingPlacement: null }),
+        set({ placement, placementRotation: 0, selection: null, openingPlacement: null, roomPlacement: null }),
       setOpeningPlacement: (openingPlacement) =>
         set({
           openingPlacement,
           openingFlip: false,
           placement: null,
+          roomPlacement: null,
           selection: null,
           // La pose de menuiseries se fait sur le plan.
           viewMode: openingPlacement ? 'plan' : get().viewMode,
         }),
       flipOpeningPlacement: () => set({ openingFlip: !get().openingFlip }),
+      setRoomPlacement: (roomPlacement) =>
+        set({
+          roomPlacement,
+          placementRotation: 0,
+          placement: null,
+          openingPlacement: null,
+          selection: null,
+          viewMode: roomPlacement ? 'plan' : get().viewMode,
+        }),
+      dropRoomPlacement: (x, y) => {
+        const { roomPlacement, placementRotation } = get();
+        if (!roomPlacement) return;
+        const a = (placementRotation * Math.PI) / 180;
+        const cos = Math.cos(a);
+        const sin = Math.sin(a);
+        const points = roomPlacement.points.map((p) => ({
+          x: x + p.x * cos - p.y * sin,
+          y: y + p.x * sin + p.y * cos,
+        }));
+        get().addRoom(points, { name: roomPlacement.name, type: roomPlacement.type });
+        set({ roomPlacement: null });
+      },
       rotatePlacement: (deltaDeg) =>
         set({ placementRotation: (((get().placementRotation + deltaDeg) % 360) + 360) % 360 }),
       setWallsMode: (wallsMode) => set({ wallsMode }),

@@ -159,6 +159,8 @@
   stroke-width: 1.5;
   stroke-dasharray: 6 4;
 }
+.poly-seg-wall { stroke: #d4a373; stroke-width: 4; }
+.poly-seg-gap { stroke: #7fb3d5; stroke-width: 2.5; stroke-dasharray: 10 7; }
 .poly-start {
   fill: rgba(212, 163, 115, 0.3);
   stroke: #d4a373;
@@ -256,6 +258,13 @@
 }
 .floor-switcher button:hover:not(.active) { background: #2e313a; color: #e8e6e1; }
 .floor-switcher .add-floor { font-weight: 700; font-size: 14px; }
+.floor-switcher.gap-toggle { top: 58px; }
+.floor-switcher.gap-toggle .walls-label {
+  color: #7d8494;
+  font-size: 11px;
+  align-self: center;
+  padding: 0 4px 0 8px;
+}
 .view3d-switcher { z-index: 10; }
 .view3d-walls {
   z-index: 10;

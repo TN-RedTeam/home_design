@@ -7,8 +7,14 @@ et visualisez le résultat en 3D — avant d'acheter ou de repeindre quoi que ce
 ## Fonctionnalités
 
 ### 🎮 Mode construction (interactions type Sims)
+- **Pièces prêtes à poser** : couloir, pièce en L, carrée, rectangulaire — un clic dans le
+  catalogue, la pièce suit le curseur (molette ou `R` pour pivoter), un clic pour la poser
 - **Traçage de murs au curseur** (outil ✏ Murs) : posez les sommets clic après clic, cotes en
-  direct, accrochage aux angles 45°, fermeture d'un clic sur le premier point ou `Entrée`
+  direct, accrochage aux angles 45°, fermeture d'un clic sur le premier point ou `Entrée` ;
+  touche `O` : le segment devient une **ouverture** (laissez un passage, reprenez le mur plus loin)
+- **Cloisons & séparations** au catalogue (cloison pleine, demi-cloison, verrière d'atelier,
+  claustra) : se posent et pivotent comme un meuble
+- **Guide des outils** intégré (bouton `?`) et boutons de rotation ⟲/⟳ dans le panneau propriétés
 - **Sections de mur sélectionnables** (2D et 3D) : clic pour sélectionner, `Suppr` pour supprimer
   la section (espace ouvert), reconstruire ou repeindre depuis le panneau
 - **Menuiseries à la souris** : palette Porte / Porte d'entrée / Fenêtre / Double fenêtre /

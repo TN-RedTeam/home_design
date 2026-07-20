@@ -116,6 +116,58 @@
 }
 .panel-toggle:hover { background: #2e313a; color: #d4a373; }
 
+/* ---------- Guide des outils ---------- */
+
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 30px;
+}
+.help-modal {
+  background: #26282e;
+  border: 1px solid #33363e;
+  border-radius: 14px;
+  max-width: 880px;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 22px 28px;
+}
+.help-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+.help-header h2 { margin: 0; font-size: 18px; }
+.help-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 28px;
+}
+.help-columns h3 {
+  color: #d4a373;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 14px 0 6px;
+}
+.help-columns ul { margin: 0; padding-left: 18px; }
+.help-columns li { color: #c9c5bc; font-size: 13px; line-height: 1.55; margin-bottom: 5px; }
+.help-columns kbd {
+  background: #1c1e22;
+  border: 1px solid #3a3e48;
+  border-radius: 4px;
+  padding: 0 5px;
+  font-family: inherit;
+  font-size: 12px;
+}
+.help-columns strong { color: #e8e6e1; }
+
 .loading {
   flex: 1;
   display: flex;
@@ -356,6 +408,9 @@
 }
 .swatch-btn:hover { border-color: rgba(255, 255, 255, 0.5); }
 .swatch-btn.active { border-color: #d4a373; box-shadow: 0 0 0 2px rgba(212, 163, 115, 0.4); }
+
+.rotate-buttons { display: flex; gap: 4px; }
+.rotate-buttons .btn { flex: 1; padding: 5px 2px; font-size: 11px; }
 
 .wall-tabs { display: flex; gap: 4px; }
 .wall-tabs button {

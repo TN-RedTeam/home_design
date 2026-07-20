@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import { CATALOG } from '../../data/catalog';
+import type { RoomPreset } from '../../store/useStore';
 import { useStore } from '../../store/useStore';
 import type { CatalogItem, FurnitureCategory, FurnitureShape, OpeningType } from '../../types';
 import { CATEGORY_LABELS, OPENING_DEFAULTS, formatLength } from '../../types';
@@ -51,6 +52,37 @@ const EMPTY_FORM: WebForm = {
   existing: false,
 };
 
+/** Rectangle centré sur l'origine. */
+const rc = (w: number, l: number) => [
+  { x: -w / 2, y: -l / 2 },
+  { x: w / 2, y: -l / 2 },
+  { x: w / 2, y: l / 2 },
+  { x: -w / 2, y: l / 2 },
+];
+
+/** Pièces prêtes à poser : un clic, elles s'accrochent au curseur comme un meuble. */
+const ROOM_PRESETS: { label: string; icon: string; preset: RoomPreset }[] = [
+  { label: 'Carrée 3×3', icon: '◻', preset: { name: 'Pièce carrée', type: 'autre', points: rc(3, 3) } },
+  { label: 'Rect. 4×3', icon: '▭', preset: { name: 'Pièce', type: 'autre', points: rc(4, 3) } },
+  { label: 'Couloir 1,2×4', icon: '☰', preset: { name: 'Couloir', type: 'couloir', points: rc(1.2, 4) } },
+  {
+    label: 'En L 4×4',
+    icon: '⌐',
+    preset: {
+      name: 'Pièce en L',
+      type: 'autre',
+      points: [
+        { x: -2, y: -2 },
+        { x: 2, y: -2 },
+        { x: 2, y: 0 },
+        { x: 0, y: 0 },
+        { x: 0, y: 2 },
+        { x: -2, y: 2 },
+      ],
+    },
+  },
+];
+
 const JOINERY: { type: OpeningType | 'velux'; label: string; icon: string }[] = [
   { type: 'porte', label: 'Porte', icon: '🚪' },
   { type: 'porte_entree', label: 'Entrée', icon: '🔑' },
@@ -65,6 +97,8 @@ export default function CatalogPanel() {
   const placement = useStore((s) => s.placement);
   const setOpeningPlacement = useStore((s) => s.setOpeningPlacement);
   const openingPlacement = useStore((s) => s.openingPlacement);
+  const setRoomPlacement = useStore((s) => s.setRoomPlacement);
+  const roomPlacement = useStore((s) => s.roomPlacement);
   const [cat, setCat] = useState<FurnitureCategory | 'tous'>('tous');
   const [search, setSearch] = useState('');
   const [showWebForm, setShowWebForm] = useState(false);
@@ -292,6 +326,21 @@ export default function CatalogPanel() {
         </div>
       ) : (
         <>
+          <h3 className="joinery-title">Pièces & couloirs</h3>
+          <div className="joinery-row">
+            {ROOM_PRESETS.map((r) => (
+              <button
+                key={r.label}
+                className={`joinery-btn ${roomPlacement?.name === r.preset.name ? 'active' : ''}`}
+                title={`${r.label} — cliquez puis posez sur le plan (R ou molette pour pivoter, dimensions modifiables ensuite)`}
+                onClick={() => setRoomPlacement(roomPlacement?.name === r.preset.name ? null : r.preset)}
+              >
+                <span className="joinery-icon">{r.icon}</span>
+                {r.label}
+              </button>
+            ))}
+          </div>
+
           <h3 className="joinery-title">Menuiseries</h3>
           <div className="joinery-row">
             {JOINERY.map((j) => (

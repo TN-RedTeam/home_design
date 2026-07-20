@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { resolveActiveFloor, useStore } from '../../store/useStore';
+import { makeWalls, resolveActiveFloor, useStore } from '../../store/useStore';
 import type { Opening, PlacedFurniture, Room, Vec2 } from '../../types';
 import { FLOOR_COLORS, OPENING_DEFAULTS, ROOF_WINDOW_DEFAULT, formatArea, formatLength } from '../../types';
 import {
@@ -95,6 +95,8 @@ export default function FloorPlanEditor() {
   const setOpeningPlacement = useStore((s) => s.setOpeningPlacement);
   const addOpening = useStore((s) => s.addOpening);
   const addRoofWindow = useStore((s) => s.addRoofWindow);
+  const roomPlacement = useStore((s) => s.roomPlacement);
+  const dropRoomPlacement = useStore((s) => s.dropRoomPlacement);
   const [ghostPos, setGhostPos] = useState<Vec2 | null>(null);
   /** Menuiserie survolant un mur : cible de pose détectée. */
   const [openingGhost, setOpeningGhost] = useState<{ roomId: string; wall: number; offset: number } | null>(null);
@@ -118,8 +120,16 @@ export default function FloorPlanEditor() {
   /** Polygone libre en cours de dessin (outil addPoly). */
   const [polyDraft, setPolyDraft] = useState<Vec2[]>([]);
   const [polyCursor, setPolyCursor] = useState<Vec2 | null>(null);
+  /** polyGaps[i] = le segment i→i+1 est une ouverture (pas de mur construit). */
+  const [polyGaps, setPolyGaps] = useState<boolean[]>([]);
+  /** Mode du prochain segment : mur plein ou ouverture (touche O). */
+  const [gapMode, setGapMode] = useState(false);
   const polyRef = useRef<Vec2[]>([]);
   polyRef.current = polyDraft;
+  const polyGapsRef = useRef<boolean[]>([]);
+  polyGapsRef.current = polyGaps;
+  const gapModeRef = useRef(false);
+  gapModeRef.current = gapMode;
 
   // Ajuste la vue au plan au premier rendu.
   useEffect(() => {
@@ -141,6 +151,8 @@ export default function FloorPlanEditor() {
     if (tool !== 'addPoly') {
       setPolyDraft([]);
       setPolyCursor(null);
+      setPolyGaps([]);
+      setGapMode(false);
     }
   }, [tool]);
 
@@ -155,8 +167,13 @@ export default function FloorPlanEditor() {
     [view]
   );
 
-  // Zoom molette centré sur le curseur.
+  // Molette : pivote l'objet en cours de pose, sinon zoome (centré sur le curseur).
   const onWheel = useCallback((e: React.WheelEvent) => {
+    const s0 = useStore.getState();
+    if (s0.placement || s0.roomPlacement) {
+      s0.rotatePlacement((e.deltaY > 0 ? 1 : -1) * (s0.roomPlacement ? 90 : 15));
+      return;
+    }
     const rect = svgRef.current!.getBoundingClientRect();
     const mx = e.clientX - rect.left;
     const my = e.clientY - rect.top;
@@ -173,13 +190,23 @@ export default function FloorPlanEditor() {
   const closePolyDraft = useCallback(() => {
     const pts = polyRef.current;
     if (pts.length >= 3 && polygonArea(pts) >= MIN_AREA / 2) {
+      const n = pts.length;
+      // Drapeaux d'ouverture par segment ; le segment de fermeture prend le mode courant.
+      const flags = [...polyGapsRef.current.slice(0, n - 1), gapModeRef.current];
       // Normalise l'orientation en sens horaire pour que murs et cotes soient cohérents.
-      const oriented = signedArea(pts) < 0 ? [...pts].reverse() : pts;
-      addRoom(oriented, { name: `Pièce ${project.rooms.length + 1}` });
+      const reversed = signedArea(pts) < 0;
+      const oriented = reversed ? [...pts].reverse() : pts;
+      const orientedFlags = reversed
+        ? oriented.map((_, k) => (k === n - 1 ? flags[n - 1] : flags[n - 2 - k]))
+        : flags;
+      const walls = makeWalls(n).map((w, i) => ({ ...w, open: orientedFlags[i] ?? false }));
+      addRoom(oriented, { name: `Pièce ${project.rooms.length + 1}`, walls });
       setTool('select');
     }
     setPolyDraft([]);
     setPolyCursor(null);
+    setPolyGaps([]);
+    setGapMode(false);
   }, [addRoom, project.rooms.length, setTool]);
 
   const onBackgroundDown = (e: React.PointerEvent) => {
@@ -210,6 +237,11 @@ export default function FloorPlanEditor() {
       setGhostPos(null);
       return;
     }
+    if (roomPlacement) {
+      dropRoomPlacement(snapTo(w.x, snap), snapTo(w.y, snap));
+      setGhostPos(null);
+      return;
+    }
     if (tool === 'addPoly') {
       const raw = { x: snapTo(w.x, snap), y: snapTo(w.y, snap) };
       const last = polyRef.current[polyRef.current.length - 1];
@@ -218,6 +250,8 @@ export default function FloorPlanEditor() {
       if (pts.length >= 3 && dist(p, pts[0]) < POLY_CLOSE_DIST) {
         closePolyDraft();
       } else {
+        // Mémorise le mode (mur / ouverture) du segment qui vient d'être tracé.
+        if (pts.length >= 1) setPolyGaps((g) => [...g, gapModeRef.current]);
         setPolyDraft([...pts, p]);
       }
       return;
@@ -235,7 +269,7 @@ export default function FloorPlanEditor() {
 
   const onMove = (e: React.PointerEvent) => {
     const w = toWorld(e.clientX, e.clientY);
-    if (placement || openingPlacement === 'velux') {
+    if (placement || roomPlacement || openingPlacement === 'velux') {
       setGhostPos({ x: snapTo(w.x, snap), y: snapTo(w.y, snap) });
     }
     if (openingPlacement && openingPlacement !== 'velux') {
@@ -354,10 +388,17 @@ export default function FloorPlanEditor() {
         closePolyDraft();
         return;
       }
+      if ((e.key === 'o' || e.key === 'O') && tool === 'addPoly') {
+        // Bascule mur plein / ouverture pour les prochains segments.
+        setGapMode((v) => !v);
+        return;
+      }
       if (e.key === 'Escape') {
         if (tool === 'addPoly' && polyRef.current.length > 0) {
           setPolyDraft([]);
           setPolyCursor(null);
+          setPolyGaps([]);
+          setGapMode(false);
         } else {
           select(null);
         }
@@ -371,7 +412,7 @@ export default function FloorPlanEditor() {
   }, [selection, tool, select, closePolyDraft]);
 
   const startRoomDrag = (e: React.PointerEvent, room: Room) => {
-    if (placement) return; // laisse le clic remonter jusqu'au fond : pose du meuble
+    if (placement || roomPlacement) return; // laisse le clic remonter jusqu'au fond : pose en cours
     if (tool !== 'select' || e.button !== 0) return;
     e.stopPropagation();
     svgRef.current!.setPointerCapture(e.pointerId);
@@ -779,7 +820,7 @@ export default function FloorPlanEditor() {
     <div className="plan-editor">
       <svg
         ref={svgRef}
-        className={`plan-svg tool-${tool} ${placement ? 'placing' : ''}`}
+        className={`plan-svg tool-${tool} ${placement || roomPlacement || openingPlacement ? 'placing' : ''}`}
         onWheel={onWheel}
         onPointerDown={onBackgroundDown}
         onPointerMove={onMove}
@@ -841,10 +882,31 @@ export default function FloorPlanEditor() {
 
         {tool === 'addPoly' && polyDraft.length > 0 && (
           <g className="draw-preview">
-            <polyline
-              points={[...polyDraft, ...(polyCursor ? [polyCursor] : [])].map((p) => `${X(p.x)},${Y(p.y)}`).join(' ')}
-              className="poly-preview"
-            />
+            {/* Segments déjà tracés : plein = mur, pointillé large = ouverture */}
+            {polyDraft.slice(0, -1).map((p, i) => {
+              const b = polyDraft[i + 1];
+              return (
+                <line
+                  key={`seg${i}`}
+                  x1={X(p.x)}
+                  y1={Y(p.y)}
+                  x2={X(b.x)}
+                  y2={Y(b.y)}
+                  className={polyGaps[i] ? 'poly-seg-gap' : 'poly-seg-wall'}
+                />
+              );
+            })}
+            {/* Segment en cours vers le curseur, stylé selon le mode (O) */}
+            {polyCursor && (
+              <line
+                x1={X(polyDraft[polyDraft.length - 1].x)}
+                y1={Y(polyDraft[polyDraft.length - 1].y)}
+                x2={X(polyCursor.x)}
+                y2={Y(polyCursor.y)}
+                className={gapMode ? 'poly-seg-gap' : 'poly-seg-wall'}
+                opacity={0.7}
+              />
+            )}
             {polyDraft.map((p, i) => (
               <circle key={i} cx={X(p.x)} cy={Y(p.y)} r={i === 0 ? 7 : 4} className={i === 0 ? 'poly-start' : 'poly-point'} />
             ))}
@@ -904,6 +966,35 @@ export default function FloorPlanEditor() {
           );
         })()}
 
+        {/* Fantôme de pièce prête à poser (couloir, L, …), pivotée à la molette / R */}
+        {roomPlacement && ghostPos && (() => {
+          const a = (placementRotation * Math.PI) / 180;
+          const cos = Math.cos(a);
+          const sin = Math.sin(a);
+          const pts = roomPlacement.points.map((p) => ({
+            x: ghostPos.x + p.x * cos - p.y * sin,
+            y: ghostPos.y + p.x * sin + p.y * cos,
+          }));
+          return (
+            <g className="draw-preview" pointerEvents="none">
+              <polygon points={pts.map((p) => `${X(p.x)},${Y(p.y)}`).join(' ')} className="poly-preview" />
+              {pts.map((p, i) => {
+                const b = pts[(i + 1) % pts.length];
+                const len = dist(p, b);
+                if (len < 0.8) return null;
+                return (
+                  <text key={i} x={X((p.x + b.x) / 2)} y={Y((p.y + b.y) / 2) - 5} className="dim-text" textAnchor="middle">
+                    {formatLength(len)}
+                  </text>
+                );
+              })}
+              <text x={X(ghostPos.x)} y={Y(ghostPos.y)} className="furn-label" textAnchor="middle">
+                {roomPlacement.name}
+              </text>
+            </g>
+          );
+        })()}
+
         {/* Fantôme de menuiserie sur le mur détecté, avec cotes de pose */}
         {openingPlacement && openingPlacement !== 'velux' && openingGhost && (() => {
           const room = floorRooms.find((r) => r.id === openingGhost.roomId);
@@ -954,7 +1045,7 @@ export default function FloorPlanEditor() {
           </g>
         )}
       </svg>
-      {project.rooms.length === 0 && !placement && !openingPlacement && tool === 'select' && polyDraft.length === 0 && (
+      {project.rooms.length === 0 && !placement && !openingPlacement && !roomPlacement && tool === 'select' && polyDraft.length === 0 && (
         <div className="empty-plan">
           <h2>Feuille blanche</h2>
           <p>Concevez votre maison de zéro :</p>
@@ -968,6 +1059,17 @@ export default function FloorPlanEditor() {
             <button className="btn btn-accent" onClick={() => setTool('addRoom')}>▭ Dessiner une pièce</button>
             <button className="btn" onClick={() => setTool('addPoly')}>✏ Tracer les murs</button>
           </div>
+        </div>
+      )}
+      {tool === 'addPoly' && (
+        <div className="floor-switcher gap-toggle">
+          <span className="walls-label">Segment :</span>
+          <button className={!gapMode ? 'active' : ''} onClick={() => setGapMode(false)} title="Les prochains segments sont des murs pleins">
+            🧱 Mur
+          </button>
+          <button className={gapMode ? 'active' : ''} onClick={() => setGapMode(true)} title="Les prochains segments sont des ouvertures : passage libre entre deux espaces (touche O)">
+            ▢ Ouverture (O)
+          </button>
         </div>
       )}
       <div className="floor-switcher">
@@ -993,7 +1095,7 @@ export default function FloorPlanEditor() {
           : tool === 'addRoom'
             ? 'Cliquez-glissez pour dessiner une pièce — un rectangle étroit devient automatiquement un couloir'
             : tool === 'addPoly'
-              ? 'Tracez les murs point par point (cotes en direct, accrochage 45°) · premier point ou Entrée pour fermer · Échap pour annuler'
+              ? 'Tracez les murs point par point (cotes en direct, 45°) · O : segment ouverture (passage sans mur) · premier point ou Entrée pour fermer · Échap annuler'
               : tool === 'measure'
                 ? 'Cliquez-glissez pour mesurer une distance'
                 : 'Molette : zoom · Glisser le fond : déplacer · Clic sur un mur : sélectionner la section (Suppr = supprimer) · Pièce : glissez les sommets, ◈ scinde un mur'}

@@ -220,6 +220,22 @@ export type Selection =
   | { kind: 'roofWindow'; roomId: ID; id: ID }
   | null;
 
+/** Meuble « accroché au curseur » en attente de pose (mode construction). */
+export interface PlacementItem {
+  catalogId?: ID;
+  name: string;
+  category: PlacedFurniture['category'];
+  shape: PlacedFurniture['shape'];
+  width: number;
+  depth: number;
+  height: number;
+  color: string;
+  photoUrl?: string;
+  existing: boolean;
+}
+
+export type WallsMode = 'auto' | 'up' | 'down';
+
 interface AppState {
   project: Project;
   selection: Selection;
@@ -232,6 +248,11 @@ interface AppState {
   activeFloorId: ID | null;
   /** Vue 3D : tous les niveaux empilés ou seulement le niveau actif. */
   show3DAllFloors: boolean;
+  /** Meuble en cours de pose au curseur (2D et 3D), avec sa rotation. */
+  placement: PlacementItem | null;
+  placementRotation: number;
+  /** Affichage des murs en 3D : effacement auto côté caméra, hauts, ou muret. */
+  wallsMode: WallsMode;
 
   setViewMode: (m: ViewMode) => void;
   setTool: (t: EditorTool) => void;
@@ -243,6 +264,11 @@ interface AppState {
 
   setActiveFloor: (id: ID) => void;
   setShow3DAllFloors: (v: boolean) => void;
+  setPlacement: (item: PlacementItem | null) => void;
+  rotatePlacement: (deltaDeg: number) => void;
+  setWallsMode: (m: WallsMode) => void;
+  /** Pose le meuble accroché au curseur à la position donnée (repère du plan). */
+  dropPlacement: (x: number, y: number) => void;
   addFloor: () => void;
   renameFloor: (id: ID, name: string) => void;
   /** Supprime un niveau et tout son contenu (interdit s'il n'en reste qu'un). */
@@ -297,6 +323,20 @@ export const useStore = create<AppState>()(
       snap: true,
       activeFloorId: null,
       show3DAllFloors: true,
+      placement: null,
+      placementRotation: 0,
+      wallsMode: 'auto',
+
+      setPlacement: (placement) => set({ placement, placementRotation: 0, selection: null }),
+      rotatePlacement: (deltaDeg) =>
+        set({ placementRotation: (((get().placementRotation + deltaDeg) % 360) + 360) % 360 }),
+      setWallsMode: (wallsMode) => set({ wallsMode }),
+      dropPlacement: (x, y) => {
+        const { placement, placementRotation } = get();
+        if (!placement) return;
+        get().addFurniture({ ...placement, x, y, rotation: placementRotation });
+        set({ placement: null });
+      },
 
       setViewMode: (viewMode) => set({ viewMode }),
       setTool: (tool) => set({ tool }),
@@ -574,3 +614,52 @@ export const useStore = create<AppState>()(
     }
   )
 );
+
+/* ------------------------------------------------------------------ */
+/* Historique annuler / refaire.                                       */
+/* Instantanés du projet (partage structurel : peu coûteux en mémoire).*/
+/* Les modifications rapprochées (< 600 ms) sont fusionnées : un       */
+/* glissement de meuble ne crée qu'une seule étape d'annulation.       */
+/* ------------------------------------------------------------------ */
+
+const past: Project[] = [];
+const future: Project[] = [];
+let lastPush = 0;
+let timeTravel = false;
+
+useStore.subscribe((state, prev) => {
+  if (timeTravel || state.project === prev.project) return;
+  if (state.project.id !== prev.project.id) {
+    // Nouveau projet ou import : l'historique repart de zéro.
+    past.length = 0;
+    future.length = 0;
+    return;
+  }
+  const now = Date.now();
+  if (now - lastPush > 600) {
+    past.push(prev.project);
+    if (past.length > 80) past.shift();
+    future.length = 0;
+  }
+  lastPush = now;
+});
+
+export function undoProject(): void {
+  const prev = past.pop();
+  if (!prev) return;
+  timeTravel = true;
+  future.push(useStore.getState().project);
+  useStore.setState({ project: prev, selection: null });
+  timeTravel = false;
+  lastPush = 0;
+}
+
+export function redoProject(): void {
+  const next = future.pop();
+  if (!next) return;
+  timeTravel = true;
+  past.push(useStore.getState().project);
+  useStore.setState({ project: next, selection: null });
+  timeTravel = false;
+  lastPush = 0;
+}

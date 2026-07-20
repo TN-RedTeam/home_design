@@ -1,11 +1,15 @@
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import type { ThreeEvent } from '@react-three/fiber';
 import { OrbitControls, ContactShadows } from '@react-three/drei';
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import * as THREE from 'three';
+import type { WallsMode } from '../../store/useStore';
 import { resolveActiveFloor, useStore } from '../../store/useStore';
 import type { PlacedFurniture, Room } from '../../types';
 import { FLOOR_COLORS, SLAB_T } from '../../types';
-import { planBounds, wallEndpoints } from '../../utils/geometry';
+import { checkPlacement, planBounds, snapTo, wallEndpoints } from '../../utils/geometry';
+
+type OrbitControlsRef = React.ComponentRef<typeof OrbitControls>;
 
 const WALL_T = 0.12;
 const FLOOR_T = 0.1;
@@ -43,33 +47,78 @@ function wallSegments(room: Room, wall: number, len: number): WallSeg[] {
   return segs.filter((s) => s.to - s.from > 0.01 && s.top - s.bottom > 0.01);
 }
 
-function Wall({ room, wall }: { room: Room; wall: number }) {
+/** Hauteur des murs en mode « muret » (comme les murs abaissés des Sims). */
+const LOW_WALL_H = 1.0;
+
+function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode }) {
   const { a, b } = wallEndpoints(room, wall);
   const len = Math.hypot(b.x - a.x, b.y - a.y);
-  const segs = useMemo(() => wallSegments(room, wall, len), [room, wall, len]);
-  if (room.walls[wall]?.open || len < 0.01) return null;
-  const angle = Math.atan2(b.y - a.y, b.x - a.x);
-  const ux = (b.x - a.x) / len;
-  const uy = (b.y - a.y) / len;
+  const allSegs = useMemo(() => wallSegments(room, wall, len), [room, wall, len]);
   const color = room.walls[wall]?.color ?? '#f4f1ea';
 
+  // Matériau partagé par tous les segments du mur : un seul fondu à piloter.
+  const mat = useMemo(
+    () => new THREE.MeshStandardMaterial({ color, roughness: 0.92, transparent: true }),
+    [color]
+  );
+  const anchorRef = useRef<THREE.Group>(null);
+  const extrasRef = useRef<THREE.Group>(null);
+  const worldPos = useMemo(() => new THREE.Vector3(), []);
+  const toCam = useMemo(() => new THREE.Vector3(), []);
+
+  const ux = len > 0 ? (b.x - a.x) / len : 1;
+  const uy = len > 0 ? (b.y - a.y) / len : 0;
+  // Polygone horaire ⇒ normale extérieure (uy, -ux) dans le plan, soit (uy, 0, -ux) en 3D.
+  const outward = useMemo(() => new THREE.Vector3(uy, 0, -ux), [ux, uy]);
+
+  // Effacement côté caméra (mode auto) : le mur dont on voit la face extérieure s'estompe.
+  useFrame(({ camera }) => {
+    let target = 1;
+    if (mode === 'auto' && anchorRef.current) {
+      anchorRef.current.getWorldPosition(worldPos);
+      toCam.copy(camera.position).sub(worldPos);
+      if (toCam.dot(outward) > 0) target = 0.1;
+    }
+    mat.opacity += (target - mat.opacity) * 0.25;
+    if (extrasRef.current) extrasRef.current.visible = mat.opacity > 0.55;
+  });
+
+  if (room.walls[wall]?.open || len < 0.01) return null;
+  const angle = Math.atan2(b.y - a.y, b.x - a.x);
+
   const at = (t: number): [number, number] => [a.x + ux * t, a.y + uy * t];
+  // Mode « muret » : les murs sont tronqués à hauteur de coude.
+  const segs =
+    mode === 'down'
+      ? allSegs
+          .filter((s) => s.bottom < LOW_WALL_H)
+          .map((s) => ({ ...s, top: Math.min(s.top, LOW_WALL_H) }))
+      : allSegs;
+  const [ax, az] = at(len / 2);
 
   return (
     <>
+      <group ref={anchorRef} position={[ax, room.height / 2, az]} />
       {segs.map((seg, i) => {
         const segLen = seg.to - seg.from;
         const h = seg.top - seg.bottom;
         const [mx, mz] = at((seg.from + seg.to) / 2);
         return (
-          <mesh key={i} position={[mx, seg.bottom + h / 2, mz]} rotation={[0, -angle, 0]} castShadow receiveShadow>
+          <mesh
+            key={i}
+            position={[mx, seg.bottom + h / 2, mz]}
+            rotation={[0, -angle, 0]}
+            castShadow
+            receiveShadow
+            material={mat}
+          >
             <boxGeometry args={[segLen, h, WALL_T]} />
-            <meshStandardMaterial color={color} roughness={0.92} />
           </mesh>
         );
       })}
-      {/* Vitrages, meneaux et vantaux dans les ouvertures */}
-      {room.openings
+      {/* Vitrages, meneaux et vantaux dans les ouvertures (masqués quand le mur s'efface) */}
+      <group ref={extrasRef}>
+      {mode !== 'down' && room.openings
         .filter((o) => o.wall === wall)
         .map((o) => {
           const off = Math.min(o.offset, Math.max(0, len - o.width));
@@ -98,11 +147,12 @@ function Wall({ room, wall }: { room: Room; wall: number }) {
             </group>
           );
         })}
+      </group>
     </>
   );
 }
 
-function RoomMesh({ room, selected }: { room: Room; selected: boolean }) {
+function RoomMesh({ room, selected, wallsMode }: { room: Room; selected: boolean; wallsMode: WallsMode }) {
   const select = useStore((s) => s.select);
 
   const floorGeometry = useMemo(() => {
@@ -142,7 +192,7 @@ function RoomMesh({ room, selected }: { room: Room; selected: boolean }) {
         </mesh>
       )}
       {room.points.map((_, i) => (
-        <Wall key={i} room={room} wall={i} />
+        <Wall key={i} room={room} wall={i} mode={wallsMode} />
       ))}
       {/* Fenêtres de toit : verrière lumineuse posée au niveau du plafond. */}
       {room.roofWindows.map((rw) => (
@@ -578,6 +628,62 @@ function FurnitureMesh({ f, selected }: { f: PlacedFurniture; selected: boolean 
   );
 }
 
+/**
+ * Navigation caméra au clavier, à la façon d'un mode construction de jeu :
+ * flèches = déplacer la vue, Q/E = pivoter, PageUp/PageDown = zoomer.
+ */
+function CameraKeys({ controlsRef }: { controlsRef: React.RefObject<OrbitControlsRef | null> }) {
+  const camera = useThree((s) => s.camera);
+  useEffect(() => {
+    const fwd = new THREE.Vector3();
+    const right = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT') return;
+      const controls = controlsRef.current;
+      if (!controls) return;
+      const step = 0.45;
+      fwd.subVectors(controls.target, camera.position);
+      fwd.y = 0;
+      if (fwd.lengthSq() < 1e-6) fwd.set(0, 0, -1);
+      fwd.normalize();
+      right.crossVectors(fwd, up).normalize().negate();
+      const pan = (v: THREE.Vector3, k: number) => {
+        controls.target.addScaledVector(v, k);
+        camera.position.addScaledVector(v, k);
+        controls.update();
+        e.preventDefault();
+      };
+      switch (e.key) {
+        case 'ArrowUp': pan(fwd, step); break;
+        case 'ArrowDown': pan(fwd, -step); break;
+        case 'ArrowLeft': pan(right, step); break;
+        case 'ArrowRight': pan(right, -step); break;
+        case 'q': case 'Q': case 'e': case 'E': {
+          const dir = e.key === 'q' || e.key === 'Q' ? 1 : -1;
+          const offset = camera.position.clone().sub(controls.target);
+          offset.applyAxisAngle(up, dir * 0.09);
+          camera.position.copy(controls.target).add(offset);
+          controls.update();
+          break;
+        }
+        case 'PageUp': case 'PageDown': {
+          const k = e.key === 'PageUp' ? 0.88 : 1.14;
+          const offset = camera.position.clone().sub(controls.target).multiplyScalar(k);
+          camera.position.copy(controls.target).add(offset);
+          controls.update();
+          e.preventDefault();
+          break;
+        }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [camera, controlsRef]);
+  return null;
+}
+
 export default function View3D() {
   const project = useStore((s) => s.project);
   const selection = useStore((s) => s.selection);
@@ -586,6 +692,29 @@ export default function View3D() {
   const setActiveFloor = useStore((s) => s.setActiveFloor);
   const showAll = useStore((s) => s.show3DAllFloors);
   const setShowAll = useStore((s) => s.setShow3DAllFloors);
+  const placement = useStore((s) => s.placement);
+  const placementRotation = useStore((s) => s.placementRotation);
+  const dropPlacement = useStore((s) => s.dropPlacement);
+  const updateFurniture = useStore((s) => s.updateFurniture);
+  const snap = useStore((s) => s.snap);
+  const wallsMode = useStore((s) => s.wallsMode);
+  const setWallsMode = useStore((s) => s.setWallsMode);
+
+  const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null);
+  const [hoverId, setHoverId] = useState<string | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const dragRef = useRef<{ id: string; dx: number; dy: number } | null>(null);
+  const controlsRef = useRef<OrbitControlsRef | null>(null);
+
+  const endDrag = () => {
+    dragRef.current = null;
+    setDraggingId(null);
+    if (controlsRef.current) controlsRef.current.enabled = true;
+  };
+  useEffect(() => {
+    window.addEventListener('pointerup', endDrag);
+    return () => window.removeEventListener('pointerup', endDrag);
+  }, []);
 
   const activeFloor = resolveActiveFloor(project, activeFloorId);
   const floorsSorted = [...project.floors].sort((a, b) => a.level - b.level);
@@ -607,6 +736,45 @@ export default function View3D() {
   const cz = (b.minY + b.maxY) / 2;
   const span = Math.max(b.maxX - b.minX, b.maxY - b.minY, 6);
 
+  const activeOffset = offsetOf(activeFloor.id);
+  const rotRad = (-placementRotation * Math.PI) / 180;
+
+  /** Vérifie l'emplacement d'un candidat sur le niveau actif (teinte verte/rouge). */
+  const check = (cand: { x: number; y: number; width: number; depth: number; rotation: number; height: number }, ignoreId?: string) =>
+    checkPlacement(project.rooms, project.furniture, activeFloor.id, cand, ignoreId);
+
+  const draggedFurniture = draggingId ? project.furniture.find((f) => f.id === draggingId) : null;
+
+  const onPlaneMove = (e: ThreeEvent<PointerEvent>) => {
+    const x = snapTo(e.point.x, snap);
+    const y = snapTo(e.point.z, snap);
+    if (placement) {
+      setGhost({ x, y });
+    } else if (dragRef.current) {
+      updateFurniture(dragRef.current.id, {
+        x: snapTo(e.point.x - dragRef.current.dx, snap),
+        y: snapTo(e.point.z - dragRef.current.dy, snap),
+      });
+    }
+  };
+
+  const onPlaneDown = (e: ThreeEvent<PointerEvent>) => {
+    if (placement && ghost) {
+      e.stopPropagation();
+      dropPlacement(ghost.x, ghost.y);
+      setGhost(null);
+    }
+  };
+
+  const startFurnitureDrag = (e: ThreeEvent<PointerEvent>, f: PlacedFurniture) => {
+    if (placement || f.floorId !== activeFloor.id) return;
+    e.stopPropagation();
+    dragRef.current = { id: f.id, dx: e.point.x - f.x, dy: e.point.z - f.y };
+    setDraggingId(f.id);
+    select({ kind: 'furniture', id: f.id });
+    if (controlsRef.current) controlsRef.current.enabled = false;
+  };
+
   return (
     <div style={{ flex: 1, minWidth: 0, background: '#111318', position: 'relative' }}>
       <div className="floor-switcher view3d-switcher">
@@ -625,6 +793,22 @@ export default function View3D() {
             {f.name}
           </button>
         ))}
+      </div>
+      <div className="floor-switcher view3d-walls">
+        <span className="walls-label">Murs</span>
+        <button className={wallsMode === 'auto' ? 'active' : ''} onClick={() => setWallsMode('auto')} title="Les murs face à la caméra s'effacent">
+          Auto
+        </button>
+        <button className={wallsMode === 'up' ? 'active' : ''} onClick={() => setWallsMode('up')}>
+          Hauts
+        </button>
+        <button className={wallsMode === 'down' ? 'active' : ''} onClick={() => setWallsMode('down')} title="Murs abaissés à 1 m">
+          Muret
+        </button>
+      </div>
+      <div className="view3d-help">
+        Glissez un meuble pour le déplacer · <kbd>R</kbd> pivoter · <kbd>Suppr</kbd> supprimer · flèches
+        déplacer la vue · <kbd>Q</kbd>/<kbd>E</kbd> pivoter la vue · <kbd>Pg↑</kbd>/<kbd>Pg↓</kbd> zoom
       </div>
       <Canvas
         shadows
@@ -646,15 +830,103 @@ export default function View3D() {
             {project.rooms
               .filter((r) => r.floorId === fl.id)
               .map((room) => (
-                <RoomMesh key={room.id} room={room} selected={selection?.kind === 'room' && selection.id === room.id} />
+                <RoomMesh
+                  key={room.id}
+                  room={room}
+                  wallsMode={wallsMode}
+                  selected={selection?.kind === 'room' && selection.id === room.id}
+                />
               ))}
             {project.furniture
               .filter((f) => f.floorId === fl.id)
               .map((f) => (
-                <FurnitureMesh key={f.id} f={f} selected={selection?.kind === 'furniture' && selection.id === f.id} />
+                <group
+                  key={f.id}
+                  onPointerDown={(e) => startFurnitureDrag(e, f)}
+                  onPointerOver={(e) => {
+                    if (fl.id !== activeFloor.id || placement) return;
+                    e.stopPropagation();
+                    setHoverId(f.id);
+                    document.body.style.cursor = 'grab';
+                  }}
+                  onPointerOut={() => {
+                    setHoverId((h) => (h === f.id ? null : h));
+                    document.body.style.cursor = '';
+                  }}
+                >
+                  <FurnitureMesh
+                    f={f}
+                    selected={(selection?.kind === 'furniture' && selection.id === f.id) || hoverId === f.id}
+                  />
+                </group>
               ))}
           </group>
         ))}
+
+        {/* Empreinte de validité sous le meuble en cours de déplacement */}
+        {draggedFurniture && (() => {
+          const c = check(draggedFurniture, draggedFurniture.id);
+          return (
+            <mesh
+              position={[draggedFurniture.x, activeOffset + 0.015, draggedFurniture.y]}
+              rotation={[-Math.PI / 2, 0, (-draggedFurniture.rotation * Math.PI) / 180]}
+            >
+              <planeGeometry args={[draggedFurniture.width + 0.1, draggedFurniture.depth + 0.1]} />
+              <meshBasicMaterial color={c.valid ? '#5ebe6e' : '#e05a4a'} transparent opacity={0.45} />
+            </mesh>
+          );
+        })()}
+
+        {/* Fantôme du meuble accroché au curseur */}
+        {placement && ghost && (() => {
+          const cand = {
+            x: ghost.x,
+            y: ghost.y,
+            width: placement.width,
+            depth: placement.depth,
+            rotation: placementRotation,
+            height: placement.height,
+          };
+          const c = check(cand);
+          const ghostF: PlacedFurniture = {
+            id: '__ghost__',
+            floorId: activeFloor.id,
+            name: placement.name,
+            category: placement.category,
+            shape: placement.shape,
+            x: ghost.x,
+            y: ghost.y,
+            rotation: placementRotation,
+            width: placement.width,
+            depth: placement.depth,
+            height: placement.height,
+            color: placement.color,
+            existing: placement.existing,
+            photoUrl: placement.photoUrl,
+          };
+          return (
+            <group position={[0, activeOffset, 0]}>
+              <mesh position={[ghost.x, 0.015, ghost.y]} rotation={[-Math.PI / 2, 0, rotRad]}>
+                <planeGeometry args={[placement.width + 0.12, placement.depth + 0.12]} />
+                <meshBasicMaterial color={c.valid ? '#5ebe6e' : '#e05a4a'} transparent opacity={0.5} />
+              </mesh>
+              <FurnitureMesh f={ghostF} selected={false} />
+            </group>
+          );
+        })()}
+
+        {/* Plan de sol invisible du niveau actif : cible du pointeur pour poser et déplacer */}
+        <mesh
+          position={[cx, activeOffset - 0.005, cz]}
+          rotation={[-Math.PI / 2, 0, 0]}
+          visible={false}
+          onPointerMove={onPlaneMove}
+          onPointerDown={onPlaneDown}
+        >
+          <planeGeometry args={[span * 8, span * 8]} />
+        </mesh>
+
+        <CameraKeys controlsRef={controlsRef} />
 
         <ContactShadows position={[cx, -FLOOR_T - 0.01, cz]} scale={span * 2.5} opacity={0.4} blur={2} far={4} />
         <mesh position={[cx, -FLOOR_T - 0.02, cz]} rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
@@ -662,7 +934,13 @@ export default function View3D() {
           <meshStandardMaterial color="#1a1d23" roughness={1} />
         </mesh>
 
-        <OrbitControls target={[cx, 0.8, cz]} maxPolarAngle={Math.PI / 2.05} minDistance={2} maxDistance={span * 4} />
+        <OrbitControls
+          ref={controlsRef}
+          target={[cx, 0.8, cz]}
+          maxPolarAngle={Math.PI / 2.05}
+          minDistance={2}
+          maxDistance={span * 4}
+        />
       </Canvas>
     </div>
   );

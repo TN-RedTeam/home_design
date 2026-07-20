@@ -6,6 +6,18 @@ et visualisez le résultat en 3D — avant d'acheter ou de repeindre quoi que ce
 
 ## Fonctionnalités
 
+### 🎮 Mode construction (interactions type Sims)
+- **Pose au curseur** : cliquez un article du catalogue, il s'accroche au curseur — fantôme avec
+  **empreinte verte/rouge** selon la validité (dans une pièce, sans chevaucher un meuble ; les tapis
+  sont exemptés), `R`/`Maj+R` pour pivoter, clic pour poser, `Échap` pour annuler — dans le plan 2D
+  **et** directement dans la 3D
+- **Glisser-déposer 3D** : attrapez n'importe quel meuble dans la vue 3D et déplacez-le à la souris,
+  avec l'empreinte de validité sous l'objet et surbrillance au survol
+- **Murs intelligents** : Auto (les murs face à la caméra s'effacent pour voir l'intérieur), Hauts,
+  ou Muret (abaissés à 1 m)
+- **Caméra clavier** : flèches pour déplacer la vue, `Q`/`E` pour orbiter, `Pg↑`/`Pg↓` pour zoomer
+- **Annuler / refaire** : `Ctrl+Z` / `Ctrl+Y` (ou boutons ↩ ↪), un geste = une étape
+
 ### 🏢 Étages multiples reliés par les escaliers
 - Niveaux illimités (rez-de-chaussée, étages…) : sélecteur au-dessus du plan, gestion (renommer,
   ajouter, supprimer) dans le panneau Propriétés

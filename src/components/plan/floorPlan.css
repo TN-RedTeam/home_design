@@ -15,6 +15,20 @@
 
 .plan-svg.tool-addRoom { cursor: crosshair; }
 .plan-svg.tool-measure { cursor: crosshair; }
+.plan-svg.placing { cursor: copy; }
+
+.ghost-furniture .ghost-footprint { stroke-width: 1.5; }
+.ghost-furniture.valid .ghost-footprint { fill: rgba(94, 190, 110, 0.28); stroke: #5ebe6e; }
+.ghost-furniture.invalid .ghost-footprint { fill: rgba(224, 90, 74, 0.28); stroke: #e05a4a; }
+.ghost-furniture .ghost-shape { fill: rgba(255, 255, 255, 0.14); stroke: rgba(255, 255, 255, 0.5); stroke-dasharray: 5 3; }
+.ghost-warn {
+  fill: #e05a4a;
+  font-size: 11px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 3px;
+}
 .plan-svg:active { cursor: grabbing; }
 
 .grid-minor { stroke: #1e2127; stroke-width: 1; }
@@ -235,6 +249,36 @@
 .floor-switcher button:hover:not(.active) { background: #2e313a; color: #e8e6e1; }
 .floor-switcher .add-floor { font-weight: 700; font-size: 14px; }
 .view3d-switcher { z-index: 10; }
+.view3d-walls {
+  z-index: 10;
+  top: 56px;
+}
+.view3d-walls .walls-label {
+  color: #7d8494;
+  font-size: 11px;
+  align-self: center;
+  padding: 0 4px 0 8px;
+}
+.view3d-help {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10;
+  background: rgba(28, 30, 34, 0.85);
+  color: #9aa1b0;
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  pointer-events: none;
+  white-space: nowrap;
+}
+.view3d-help kbd {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.item-actions .placing { outline: 2px solid #fff; }
 
 .plan-hints {
   position: absolute;

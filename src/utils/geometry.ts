@@ -136,6 +136,81 @@ export function translatePoints(points: Vec2[], dx: number, dy: number): Vec2[] 
   return points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
 }
 
+/** Coins du rectangle d'emprise d'un meuble (rotation comprise), repère du plan. */
+export function furnitureCorners(f: { x: number; y: number; width: number; depth: number; rotation: number }): Vec2[] {
+  const a = (f.rotation * Math.PI) / 180;
+  const cos = Math.cos(a);
+  const sin = Math.sin(a);
+  const hw = f.width / 2;
+  const hd = f.depth / 2;
+  return [
+    { x: -hw, y: -hd },
+    { x: hw, y: -hd },
+    { x: hw, y: hd },
+    { x: -hw, y: hd },
+  ].map((p) => ({ x: f.x + p.x * cos - p.y * sin, y: f.y + p.x * sin + p.y * cos }));
+}
+
+/** Collision entre deux rectangles orientés (théorème des axes séparateurs). */
+export function orientedRectsCollide(a: Vec2[], b: Vec2[]): boolean {
+  for (const rect of [a, b]) {
+    for (let i = 0; i < rect.length; i++) {
+      const p1 = rect[i];
+      const p2 = rect[(i + 1) % rect.length];
+      // Axe normal à l'arête.
+      const nx = p2.y - p1.y;
+      const ny = p1.x - p2.x;
+      let minA = Infinity, maxA = -Infinity, minB = Infinity, maxB = -Infinity;
+      for (const p of a) {
+        const proj = p.x * nx + p.y * ny;
+        minA = Math.min(minA, proj);
+        maxA = Math.max(maxA, proj);
+      }
+      for (const p of b) {
+        const proj = p.x * nx + p.y * ny;
+        minB = Math.min(minB, proj);
+        maxB = Math.max(maxB, proj);
+      }
+      if (maxA < minB || maxB < minA) return false;
+    }
+  }
+  return true;
+}
+
+export interface PlacementCheck {
+  /** Le centre est dans une pièce du niveau. */
+  inRoom: boolean;
+  /** Chevauche un autre meuble du niveau (tapis et objets plats ignorés). */
+  collides: boolean;
+  valid: boolean;
+}
+
+/** Un meuble est plat (tapis…) s'il fait moins de 6 cm de haut : pas de collision. */
+const FLAT_H = 0.06;
+
+/** Validité d'un emplacement de meuble à la façon d'un mode construction de jeu. */
+export function checkPlacement(
+  rooms: Room[],
+  furniture: { id: string; floorId: string; x: number; y: number; width: number; depth: number; rotation: number; height: number }[],
+  floorId: string,
+  cand: { x: number; y: number; width: number; depth: number; rotation: number; height: number },
+  ignoreId?: string
+): PlacementCheck {
+  const inRoom = rooms.some((r) => r.floorId === floorId && pointInPolygon({ x: cand.x, y: cand.y }, r.points));
+  let collides = false;
+  if (cand.height >= FLAT_H) {
+    const candCorners = furnitureCorners(cand);
+    for (const other of furniture) {
+      if (other.id === ignoreId || other.floorId !== floorId || other.height < FLAT_H) continue;
+      if (orientedRectsCollide(candCorners, furnitureCorners(other))) {
+        collides = true;
+        break;
+      }
+    }
+  }
+  return { inRoom, collides, valid: inRoom && !collides };
+}
+
 /** Test d'appartenance d'un point au polygone (ray casting). */
 export function pointInPolygon(p: Vec2, points: Vec2[]): boolean {
   let inside = false;

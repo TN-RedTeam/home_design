@@ -87,6 +87,21 @@
   min-height: 0;
 }
 
+.placement-banner {
+  background: #d4a373;
+  color: #1c1e22;
+  font-size: 13px;
+  text-align: center;
+  padding: 6px 12px;
+  flex-shrink: 0;
+}
+.placement-banner kbd {
+  background: rgba(0, 0, 0, 0.18);
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-family: inherit;
+}
+
 .loading {
   flex: 1;
   display: flex;

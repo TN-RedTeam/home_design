@@ -954,6 +954,22 @@ export default function FloorPlanEditor() {
           </g>
         )}
       </svg>
+      {project.rooms.length === 0 && !placement && !openingPlacement && tool === 'select' && polyDraft.length === 0 && (
+        <div className="empty-plan">
+          <h2>Feuille blanche</h2>
+          <p>Concevez votre maison de zéro :</p>
+          <ol>
+            <li><strong>▭ Pièce</strong> — dessinez un rectangle (un tracé étroit devient un couloir)</li>
+            <li><strong>✏ Murs</strong> — tracez vos murs point par point, cotes en direct</li>
+            <li>Ajoutez portes et fenêtres depuis la palette <strong>Menuiseries</strong></li>
+            <li>Meublez depuis le <strong>Catalogue</strong>, puis visualisez en <strong>Vue 3D</strong></li>
+          </ol>
+          <div className="empty-plan-actions">
+            <button className="btn btn-accent" onClick={() => setTool('addRoom')}>▭ Dessiner une pièce</button>
+            <button className="btn" onClick={() => setTool('addPoly')}>✏ Tracer les murs</button>
+          </div>
+        </div>
+      )}
       <div className="floor-switcher">
         {floorsSorted.map((f) => (
           <button

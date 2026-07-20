@@ -50,6 +50,19 @@ function normalizeRoom(room: Room): Room {
   return { ...withDefaults, walls };
 }
 
+/** Projet vierge : un seul niveau, aucune pièce — l'utilisateur conçoit tout lui-même. */
+function emptyProject(): Project {
+  return {
+    id: uid(),
+    name: 'Nouveau projet',
+    floors: [{ id: uid(), name: 'Rez-de-chaussée', level: 0 }],
+    rooms: [],
+    furniture: [],
+    photos: [],
+    updatedAt: Date.now(),
+  };
+}
+
 function demoProject(): Project {
   const rdc: Floor = { id: uid(), name: 'Rez-de-chaussée', level: 0 };
   const etage: Floor = { id: uid(), name: 'Étage 1', level: 1 };
@@ -268,7 +281,10 @@ interface AppState {
   setSnap: (v: boolean) => void;
   select: (s: Selection) => void;
   renameProject: (name: string) => void;
+  /** Repart d'un projet totalement vierge (aucune pièce). */
   newProject: () => void;
+  /** Charge le projet d'exemple (maison de démonstration). */
+  loadDemoProject: () => void;
   importProject: (p: Project) => void;
 
   setActiveFloor: (id: ID) => void;
@@ -367,7 +383,10 @@ export const useStore = create<AppState>()(
       setSnap: (snap) => set({ snap }),
       select: (selection) => set({ selection }),
       renameProject: (name) => set({ project: touch({ ...get().project, name }) }),
-      newProject: () => set({ project: demoProject(), selection: null, activePhotoId: null, activeFloorId: null }),
+      newProject: () =>
+        set({ project: emptyProject(), selection: null, activePhotoId: null, activeFloorId: null, placement: null, openingPlacement: null, tool: 'select' }),
+      loadDemoProject: () =>
+        set({ project: demoProject(), selection: null, activePhotoId: null, activeFloorId: null, placement: null, openingPlacement: null, tool: 'select' }),
       importProject: (p) =>
         set({ project: touch(migrateProject(p)), selection: null, activePhotoId: null, activeFloorId: null }),
 

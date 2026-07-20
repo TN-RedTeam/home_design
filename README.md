@@ -7,6 +7,15 @@ et visualisez le résultat en 3D — avant d'acheter ou de repeindre quoi que ce
 ## Fonctionnalités
 
 ### 🎮 Mode construction (interactions type Sims)
+- **Traçage de murs au curseur** (outil ✏ Murs) : posez les sommets clic après clic, cotes en
+  direct, accrochage aux angles 45°, fermeture d'un clic sur le premier point ou `Entrée`
+- **Sections de mur sélectionnables** (2D et 3D) : clic pour sélectionner, `Suppr` pour supprimer
+  la section (espace ouvert), reconstruire ou repeindre depuis le panneau
+- **Menuiseries à la souris** : palette Porte / Porte d'entrée / Fenêtre / Double fenêtre /
+  Porte-fenêtre / Velux — la menuiserie s'accroche au curseur, glisse le long des murs avec ses
+  cotes de pose, refuse les chevauchements, `R` inverse le sens d'ouverture des portes
+- **Couloirs** : un rectangle étroit dessiné est automatiquement reconnu comme couloir
+- **Panneaux repliables** : masquez catalogue et propriétés pour une vue plein écran
 - **Pose au curseur** : cliquez un article du catalogue, il s'accroche au curseur — fantôme avec
   **empreinte verte/rouge** selon la validité (dans une pièce, sans chevaucher un meuble ; les tapis
   sont exemptés), `R`/`Maj+R` pour pivoter, clic pour poser, `Échap` pour annuler — dans le plan 2D

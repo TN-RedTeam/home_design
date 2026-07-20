@@ -40,6 +40,14 @@
   stroke-linecap: square;
 }
 .room.selected .room-wall { stroke: #d4a373; }
+.wall-selected { stroke: #e8a94a !important; }
+
+.opening-ghost-rect {
+  fill: rgba(212, 163, 115, 0.35);
+  stroke: #d4a373;
+  stroke-width: 1.5;
+  stroke-dasharray: 6 4;
+}
 .room-wall-open {
   stroke: #6d7688;
   stroke-dasharray: 7 5;

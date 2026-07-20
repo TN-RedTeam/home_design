@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import CatalogPanel from './components/panels/CatalogPanel';
 import PropertiesPanel from './components/panels/PropertiesPanel';
 import FloorPlanEditor from './components/plan/FloorPlanEditor';
@@ -22,6 +22,10 @@ export default function App() {
   const importProject = useStore((s) => s.importProject);
   const importRef = useRef<HTMLInputElement>(null);
   const placement = useStore((s) => s.placement);
+  const openingPlacement = useStore((s) => s.openingPlacement);
+  const openingFlip = useStore((s) => s.openingFlip);
+  const [leftOpen, setLeftOpen] = useState(true);
+  const [rightOpen, setRightOpen] = useState(true);
 
   // Raccourcis globaux (plan 2D et vue 3D) : rotation, duplication,
   // suppression, pose au curseur, annuler/refaire.
@@ -41,17 +45,25 @@ export default function App() {
         redoProject();
         return;
       }
-      if (e.key === 'Escape' && s.placement) {
-        s.setPlacement(null);
+      if (e.key === 'Escape' && (s.placement || s.openingPlacement)) {
+        if (s.placement) s.setPlacement(null);
+        if (s.openingPlacement) s.setOpeningPlacement(null);
         return;
       }
       if (e.key === 'r' || e.key === 'R') {
         const delta = e.shiftKey ? -15 : 15;
         if (s.placement) {
           s.rotatePlacement(delta);
+        } else if (s.openingPlacement) {
+          s.flipOpeningPlacement();
         } else if (s.selection?.kind === 'furniture') {
-          const f = s.project.furniture.find((x) => x.id === s.selection!.id);
+          const selId = s.selection.id;
+          const f = s.project.furniture.find((x) => x.id === selId);
           if (f) s.updateFurniture(f.id, { rotation: (((f.rotation + delta) % 360) + 360) % 360 });
+        } else if (s.selection?.kind === 'opening') {
+          const { roomId, id } = s.selection;
+          const o = s.project.rooms.find((r) => r.id === roomId)?.openings.find((x) => x.id === id);
+          if (o) s.updateOpening(roomId, id, { flip: !o.flip });
         }
         return;
       }
@@ -64,6 +76,11 @@ export default function App() {
         if (s.selection.kind === 'furniture') s.removeFurniture(s.selection.id);
         if (s.selection.kind === 'opening') s.removeOpening(s.selection.roomId, s.selection.id);
         if (s.selection.kind === 'roofWindow') s.removeRoofWindow(s.selection.roomId, s.selection.id);
+        if (s.selection.kind === 'wall') {
+          // Supprimer une section de mur = l'ouvrir (espace traversant), comme dans un mode construction.
+          s.updateWall(s.selection.roomId, s.selection.index, { open: true });
+          s.select(null);
+        }
       }
     };
     window.addEventListener('keydown', onKey);
@@ -117,8 +134,15 @@ export default function App() {
             <button className={tool === 'select' ? 'active' : ''} onClick={() => setTool('select')} title="Sélectionner / déplacer">
               ☰ Sélection
             </button>
-            <button className={tool === 'addRoom' ? 'active' : ''} onClick={() => setTool('addRoom')} title="Dessiner une pièce">
+            <button className={tool === 'addRoom' ? 'active' : ''} onClick={() => setTool('addRoom')} title="Dessiner une pièce rectangulaire (ou un couloir étroit)">
               ▭ Pièce
+            </button>
+            <button
+              className={tool === 'addPoly' ? 'active' : ''}
+              onClick={() => setTool('addPoly')}
+              title="Tracer les murs point par point, cotes en direct (accrochage 45°)"
+            >
+              ✏ Murs
             </button>
             <button className={tool === 'measure' ? 'active' : ''} onClick={() => setTool('measure')} title="Mesurer">
               ⤢ Mesure
@@ -171,15 +195,47 @@ export default function App() {
           le poser · <kbd>R</kbd> pivoter · <kbd>Échap</kbd> annuler
         </div>
       )}
+      {openingPlacement && (
+        <div className="placement-banner">
+          🚪 <strong>{openingPlacement === 'velux' ? 'Fenêtre de toit' : ''}</strong>
+          {openingPlacement === 'velux'
+            ? ' accrochée au curseur — cliquez dans une pièce pour la poser'
+            : ' Menuiserie accrochée au curseur — glissez le long d’un mur puis cliquez pour la poser'}
+          {openingPlacement !== 'velux' && (
+            <>
+              {' '}· <kbd>R</kbd> inverser le sens{openingFlip ? ' (inversé)' : ''}
+            </>
+          )}{' '}
+          · <kbd>Échap</kbd> annuler
+        </div>
+      )}
 
       <main className="workspace">
-        {viewMode !== 'photo' && <CatalogPanel />}
+        {viewMode !== 'photo' && leftOpen && <CatalogPanel />}
+        {viewMode !== 'photo' && (
+          <button
+            className={`panel-toggle left ${leftOpen ? '' : 'closed'}`}
+            onClick={() => setLeftOpen((v) => !v)}
+            title={leftOpen ? 'Masquer le catalogue' : 'Afficher le catalogue'}
+          >
+            {leftOpen ? '⟨' : '⟩'}
+          </button>
+        )}
         <Suspense fallback={<div className="loading">Chargement…</div>}>
           {viewMode === 'plan' && <FloorPlanEditor />}
           {viewMode === '3d' && <View3D />}
           {viewMode === 'photo' && <PhotoStudio />}
         </Suspense>
-        {viewMode !== 'photo' && <PropertiesPanel />}
+        {viewMode !== 'photo' && (
+          <button
+            className={`panel-toggle right ${rightOpen ? '' : 'closed'}`}
+            onClick={() => setRightOpen((v) => !v)}
+            title={rightOpen ? 'Masquer les propriétés' : 'Afficher les propriétés'}
+          >
+            {rightOpen ? '⟩' : '⟨'}
+          </button>
+        )}
+        {viewMode !== 'photo' && rightOpen && <PropertiesPanel />}
       </main>
     </div>
   );

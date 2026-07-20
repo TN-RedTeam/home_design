@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState } from 'react';
 import { CATALOG } from '../../data/catalog';
 import { useStore } from '../../store/useStore';
-import type { CatalogItem, FurnitureCategory, FurnitureShape } from '../../types';
-import { CATEGORY_LABELS, formatLength } from '../../types';
+import type { CatalogItem, FurnitureCategory, FurnitureShape, OpeningType } from '../../types';
+import { CATEGORY_LABELS, OPENING_DEFAULTS, formatLength } from '../../types';
 import { removeBackground } from '../../utils/cutout';
 
 function readImageAsDataUrl(file: File, maxW = 600): Promise<string> {
@@ -51,9 +51,20 @@ const EMPTY_FORM: WebForm = {
   existing: false,
 };
 
+const JOINERY: { type: OpeningType | 'velux'; label: string; icon: string }[] = [
+  { type: 'porte', label: 'Porte', icon: '🚪' },
+  { type: 'porte_entree', label: 'Entrée', icon: '🔑' },
+  { type: 'fenetre', label: 'Fenêtre', icon: '🪟' },
+  { type: 'double_fenetre', label: 'Double', icon: '🪟' },
+  { type: 'porte_fenetre', label: 'Porte-fen.', icon: '🌿' },
+  { type: 'velux', label: 'Velux', icon: '☀️' },
+];
+
 export default function CatalogPanel() {
   const setPlacement = useStore((s) => s.setPlacement);
   const placement = useStore((s) => s.placement);
+  const setOpeningPlacement = useStore((s) => s.setOpeningPlacement);
+  const openingPlacement = useStore((s) => s.openingPlacement);
   const [cat, setCat] = useState<FurnitureCategory | 'tous'>('tous');
   const [search, setSearch] = useState('');
   const [showWebForm, setShowWebForm] = useState(false);
@@ -281,6 +292,25 @@ export default function CatalogPanel() {
         </div>
       ) : (
         <>
+          <h3 className="joinery-title">Menuiseries</h3>
+          <div className="joinery-row">
+            {JOINERY.map((j) => (
+              <button
+                key={j.type}
+                className={`joinery-btn ${openingPlacement === j.type ? 'active' : ''}`}
+                title={
+                  j.type === 'velux'
+                    ? 'Fenêtre de toit — cliquez dans une pièce du plan'
+                    : `${j.label} (${Math.round(OPENING_DEFAULTS[j.type as OpeningType].width * 100)} cm) — glissez sur un mur du plan`
+                }
+                onClick={() => setOpeningPlacement(openingPlacement === j.type ? null : j.type)}
+              >
+                <span className="joinery-icon">{j.icon}</span>
+                {j.label}
+              </button>
+            ))}
+          </div>
+
           <input
             className="search"
             value={search}

@@ -267,6 +267,37 @@ function RoofWindowProps({ roomId, roofWindowId }: { roomId: string; roofWindowI
   );
 }
 
+function WallProps({ roomId, index }: { roomId: string; index: number }) {
+  const room = useStore((s) => s.project.rooms.find((r) => r.id === roomId));
+  const updateWall = useStore((s) => s.updateWall);
+  const select = useStore((s) => s.select);
+  if (!room || !room.walls[index]) return null;
+  const wall = room.walls[index];
+  return (
+    <>
+      <h2>Section de mur</h2>
+      <p className="hint">
+        {room.name} — mur {index + 1} · {formatLength(wallLength(room, index))}.{' '}
+        {wall.open ? 'Section supprimée (espace ouvert).' : 'Touche Suppr : supprimer cette section de mur.'}
+      </p>
+      {wall.open ? (
+        <button className="btn btn-accent btn-block" onClick={() => updateWall(roomId, index, { open: false })}>
+          ➕ Reconstruire ce mur
+        </button>
+      ) : (
+        <>
+          <h3>Peinture</h3>
+          <PaintPicker value={wall.color} onChange={(hex) => updateWall(roomId, index, { color: hex })} />
+          <button className="btn btn-danger btn-block" onClick={() => { updateWall(roomId, index, { open: true }); }}>
+            🗑 Supprimer cette section (mur ouvert)
+          </button>
+        </>
+      )}
+      <button className="btn btn-block" onClick={() => select({ kind: 'room', id: roomId })}>← Voir toute la pièce</button>
+    </>
+  );
+}
+
 function OpeningProps({ roomId, openingId }: { roomId: string; openingId: string }) {
   const room = useStore((s) => s.project.rooms.find((r) => r.id === roomId));
   const updateOpening = useStore((s) => s.updateOpening);
@@ -313,6 +344,16 @@ function OpeningProps({ roomId, openingId }: { roomId: string; openingId: string
           <CmField label="Allège (cm)" value={o.sillHeight} min={0} onChange={(v) => updateOpening(roomId, o.id, { sillHeight: v })} />
         )}
       </div>
+      {(o.type === 'porte' || o.type === 'porte_entree' || o.type === 'porte_fenetre') && (
+        <label className="check-row">
+          <input
+            type="checkbox"
+            checked={o.flip ?? false}
+            onChange={(e) => updateOpening(roomId, o.id, { flip: e.target.checked })}
+          />
+          Sens d'ouverture inversé (R)
+        </label>
+      )}
       <button className="btn btn-block" onClick={() => select({ kind: 'room', id: roomId })}>← Retour à la pièce</button>
       <button className="btn btn-danger btn-block" onClick={() => removeOpening(roomId, o.id)}>Supprimer</button>
     </>
@@ -432,6 +473,7 @@ export default function PropertiesPanel() {
         const room = project.rooms.find((r) => r.id === selection.id);
         return room ? <RoomProps room={room} /> : null;
       })()}
+      {selection?.kind === 'wall' && <WallProps roomId={selection.roomId} index={selection.index} />}
       {selection?.kind === 'opening' && <OpeningProps roomId={selection.roomId} openingId={selection.id} />}
       {selection?.kind === 'roofWindow' && <RoofWindowProps roomId={selection.roomId} roofWindowId={selection.id} />}
       {selection?.kind === 'furniture' && <FurnitureProps id={selection.id} />}

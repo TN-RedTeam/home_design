@@ -102,6 +102,20 @@
   font-family: inherit;
 }
 
+.panel-toggle {
+  width: 18px;
+  flex-shrink: 0;
+  background: #26282e;
+  border: none;
+  border-left: 1px solid #33363e;
+  border-right: 1px solid #33363e;
+  color: #9aa1b0;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+.panel-toggle:hover { background: #2e313a; color: #d4a373; }
+
 .loading {
   flex: 1;
   display: flex;
@@ -230,6 +244,29 @@
 .link:hover { text-decoration: underline; }
 
 /* ---------- Catalogue ---------- */
+
+.joinery-title { margin-top: 0 !important; }
+.joinery-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 5px;
+}
+.joinery-btn {
+  background: #1c1e22;
+  border: 1px solid #33363e;
+  color: #c9c5bc;
+  border-radius: 8px;
+  padding: 7px 4px;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+}
+.joinery-btn .joinery-icon { font-size: 16px; }
+.joinery-btn:hover { border-color: #d4a373; }
+.joinery-btn.active { background: #d4a373; color: #1c1e22; border-color: #d4a373; font-weight: 600; }
 
 .search { margin-bottom: 2px; }
 

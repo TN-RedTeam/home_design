@@ -72,6 +72,8 @@ export interface Opening {
   height: number;
   /** Hauteur d'allège (bas de fenêtre) en m — 0 pour une porte. */
   sillHeight: number;
+  /** Sens d'ouverture inversé (battant de porte en miroir). */
+  flip?: boolean;
 }
 
 /** Mur = arête du polygone de la pièce. `open` = absence de mur (espace ouvert). */

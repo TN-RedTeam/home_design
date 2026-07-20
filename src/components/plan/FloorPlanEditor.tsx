@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { resolveActiveFloor, useStore } from '../../store/useStore';
 import type { Opening, PlacedFurniture, Room, Vec2 } from '../../types';
-import { FLOOR_COLORS, formatArea, formatLength } from '../../types';
+import { FLOOR_COLORS, OPENING_DEFAULTS, ROOF_WINDOW_DEFAULT, formatArea, formatLength } from '../../types';
 import {
   checkPlacement,
   clamp,
@@ -9,6 +9,7 @@ import {
   furnitureCorners,
   openingSegment,
   planBounds,
+  pointInPolygon,
   polygonArea,
   polygonCentroid,
   rectPoints,
@@ -20,9 +21,14 @@ import './floorPlan.css';
 
 /** Épaisseur visuelle des murs en mètres. */
 const WALL_T = 0.15;
-const MIN_ROOM = 1;
+/** Côté minimal d'une pièce (0,60 m : un couloir étroit reste traçable). */
+const MIN_SIDE = 0.6;
+/** Surface minimale d'une pièce en m². */
+const MIN_AREA = 0.8;
 /** Distance (m) sous laquelle un clic ferme le polygone en cours. */
 const POLY_CLOSE_DIST = 0.35;
+/** Distance (m) de détection d'un mur pour la pose de menuiseries. */
+const WALL_SNAP_DIST = 0.5;
 
 interface View {
   x: number; // coin haut-gauche du viewport en mètres
@@ -53,6 +59,17 @@ function signedArea(points: Vec2[]): number {
   return s / 2;
 }
 
+/** Accroche un point à 45° près autour du point précédent (tracé de murs façon jeu). */
+function snapAngle(from: Vec2, to: Vec2): Vec2 {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const len = Math.hypot(dx, dy);
+  if (len < 1e-6) return to;
+  const angle = Math.atan2(dy, dx);
+  const snapped = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+  return { x: from.x + len * Math.cos(snapped), y: from.y + len * Math.sin(snapped) };
+}
+
 export default function FloorPlanEditor() {
   const project = useStore((s) => s.project);
   const selection = useStore((s) => s.selection);
@@ -73,7 +90,14 @@ export default function FloorPlanEditor() {
   const placement = useStore((s) => s.placement);
   const placementRotation = useStore((s) => s.placementRotation);
   const dropPlacement = useStore((s) => s.dropPlacement);
+  const openingPlacement = useStore((s) => s.openingPlacement);
+  const openingFlip = useStore((s) => s.openingFlip);
+  const setOpeningPlacement = useStore((s) => s.setOpeningPlacement);
+  const addOpening = useStore((s) => s.addOpening);
+  const addRoofWindow = useStore((s) => s.addRoofWindow);
   const [ghostPos, setGhostPos] = useState<Vec2 | null>(null);
+  /** Menuiserie survolant un mur : cible de pose détectée. */
+  const [openingGhost, setOpeningGhost] = useState<{ roomId: string; wall: number; offset: number } | null>(null);
 
   const activeFloor = resolveActiveFloor(project, activeFloorId);
   const floorsSorted = [...project.floors].sort((a, b) => a.level - b.level);
@@ -148,7 +172,7 @@ export default function FloorPlanEditor() {
 
   const closePolyDraft = useCallback(() => {
     const pts = polyRef.current;
-    if (pts.length >= 3 && polygonArea(pts) >= MIN_ROOM) {
+    if (pts.length >= 3 && polygonArea(pts) >= MIN_AREA / 2) {
       // Normalise l'orientation en sens horaire pour que murs et cotes soient cohérents.
       const oriented = signedArea(pts) < 0 ? [...pts].reverse() : pts;
       addRoom(oriented, { name: `Pièce ${project.rooms.length + 1}` });
@@ -161,13 +185,35 @@ export default function FloorPlanEditor() {
   const onBackgroundDown = (e: React.PointerEvent) => {
     if (e.button !== 0) return;
     const w = toWorld(e.clientX, e.clientY);
+    if (openingPlacement) {
+      if (openingPlacement === 'velux') {
+        const room = floorRooms.find((r) => pointInPolygon(w, r.points));
+        if (room) {
+          addRoofWindow(room.id, { x: snapTo(w.x, snap), y: snapTo(w.y, snap), ...ROOF_WINDOW_DEFAULT });
+          setOpeningPlacement(null);
+        }
+      } else if (openingGhost) {
+        addOpening(openingGhost.roomId, {
+          type: openingPlacement,
+          wall: openingGhost.wall,
+          offset: openingGhost.offset,
+          ...OPENING_DEFAULTS[openingPlacement],
+          flip: openingFlip,
+        });
+        setOpeningPlacement(null);
+        setOpeningGhost(null);
+      }
+      return;
+    }
     if (placement) {
       dropPlacement(snapTo(w.x, snap), snapTo(w.y, snap));
       setGhostPos(null);
       return;
     }
     if (tool === 'addPoly') {
-      const p = { x: snapTo(w.x, snap), y: snapTo(w.y, snap) };
+      const raw = { x: snapTo(w.x, snap), y: snapTo(w.y, snap) };
+      const last = polyRef.current[polyRef.current.length - 1];
+      const p = snap && last ? snapAngle(last, raw) : raw;
       const pts = polyRef.current;
       if (pts.length >= 3 && dist(p, pts[0]) < POLY_CLOSE_DIST) {
         closePolyDraft();
@@ -189,11 +235,41 @@ export default function FloorPlanEditor() {
 
   const onMove = (e: React.PointerEvent) => {
     const w = toWorld(e.clientX, e.clientY);
-    if (placement) {
+    if (placement || openingPlacement === 'velux') {
       setGhostPos({ x: snapTo(w.x, snap), y: snapTo(w.y, snap) });
     }
+    if (openingPlacement && openingPlacement !== 'velux') {
+      // Cherche le mur (non ouvert) le plus proche du curseur sur le niveau actif.
+      let best: { roomId: string; wall: number; offset: number; d: number } | null = null;
+      for (const room of floorRooms) {
+        for (let i = 0; i < room.points.length; i++) {
+          if (room.walls[i]?.open) continue;
+          const { a, b } = wallEndpoints(room, i);
+          const len = dist(a, b);
+          if (len < 1e-6) continue;
+          const t = clamp(((w.x - a.x) * (b.x - a.x) + (w.y - a.y) * (b.y - a.y)) / (len * len), 0, 1);
+          const px2 = a.x + (b.x - a.x) * t;
+          const py2 = a.y + (b.y - a.y) * t;
+          const d = Math.hypot(w.x - px2, w.y - py2);
+          if (d < WALL_SNAP_DIST && (!best || d < best.d)) {
+            const width = OPENING_DEFAULTS[openingPlacement].width;
+            if (len < width) continue;
+            const offset = clamp(snapTo(t * len - width / 2, snap), 0, len - width);
+            // Pas de chevauchement avec une menuiserie déjà posée sur ce mur.
+            const overlaps = room.openings.some(
+              (o2) => o2.wall === i && offset < o2.offset + o2.width && o2.offset < offset + width
+            );
+            if (overlaps) continue;
+            best = { roomId: room.id, wall: i, offset, d };
+          }
+        }
+      }
+      setOpeningGhost(best ? { roomId: best.roomId, wall: best.wall, offset: best.offset } : null);
+    }
     if (tool === 'addPoly') {
-      setPolyCursor({ x: snapTo(w.x, snap), y: snapTo(w.y, snap) });
+      const raw = { x: snapTo(w.x, snap), y: snapTo(w.y, snap) };
+      const last = polyRef.current[polyRef.current.length - 1];
+      setPolyCursor(snap && last ? snapAngle(last, raw) : raw);
     }
     const d = dragRef.current;
     if (!d) return;
@@ -256,8 +332,13 @@ export default function FloorPlanEditor() {
       const y = Math.min(d.y0, d.y1);
       const width = Math.abs(d.x1 - d.x0);
       const length = Math.abs(d.y1 - d.y0);
-      if (width >= MIN_ROOM && length >= MIN_ROOM) {
-        addRoom(rectPoints(x, y, width, length), { name: `Pièce ${project.rooms.length + 1}` });
+      if (width >= MIN_SIDE && length >= MIN_SIDE && width * length >= MIN_AREA) {
+        // Un rectangle étroit et allongé est reconnu comme couloir.
+        const isCorridor = Math.min(width, length) <= 1.3 && Math.max(width, length) / Math.min(width, length) >= 2.2;
+        addRoom(rectPoints(x, y, width, length), {
+          name: isCorridor ? 'Couloir' : `Pièce ${project.rooms.length + 1}`,
+          type: isCorridor ? 'couloir' : 'autre',
+        });
         setTool('select');
       }
     }
@@ -357,6 +438,8 @@ export default function FloorPlanEditor() {
         transform={`rotate(${seg.angle} ${cx} ${cy})`}
         className={`opening ${isSel ? 'selected' : ''}`}
         onPointerDown={(e) => {
+          // Pendant une pose, le clic doit atteindre le fond (drop), pas l'ouverture existante.
+          if (openingPlacement || placement) return;
           if (tool !== 'select' || e.button !== 0) return;
           e.stopPropagation();
           svgRef.current!.setPointerCapture(e.pointerId);
@@ -376,14 +459,17 @@ export default function FloorPlanEditor() {
           </>
         ) : (
           <>
-            <line
-              x1={cx - len / 2}
-              y1={cy}
-              x2={cx - len / 2}
-              y2={cy - len}
-              className={o.type === 'porte_entree' ? 'door-leaf entry' : 'door-leaf'}
-            />
-            <path d={`M ${cx - len / 2} ${cy - len} A ${len} ${len} 0 0 1 ${cx + len / 2} ${cy}`} className="door-arc" />
+            {/* Battant et arc de débattement, en miroir si le sens est inversé (R). */}
+            <g transform={o.flip ? `translate(${2 * cx} 0) scale(-1 1)` : undefined}>
+              <line
+                x1={cx - len / 2}
+                y1={cy}
+                x2={cx - len / 2}
+                y2={cy - len}
+                className={o.type === 'porte_entree' ? 'door-leaf entry' : 'door-leaf'}
+              />
+              <path d={`M ${cx - len / 2} ${cy - len} A ${len} ${len} 0 0 1 ${cx + len / 2} ${cy}`} className="door-arc" />
+            </g>
             {o.type === 'porte_entree' && (
               <rect x={cx - len / 2} y={cy - t / 2} width={len} height={t} className="entry-sill" />
             )}
@@ -647,10 +733,12 @@ export default function FloorPlanEditor() {
           className="room-floor"
           onPointerDown={(e) => startRoomDrag(e, room)}
         />
-        {/* Murs : trait épais si fermé, pointillé fin si ouvert. */}
+        {/* Murs : trait épais si fermé, pointillé fin si ouvert. Chaque section est
+            sélectionnable (Suppr = supprimer la section, panneau = peinture). */}
         {room.points.map((a, i) => {
           const b = room.points[(i + 1) % room.points.length];
           const open = room.walls[i]?.open;
+          const isSelWall = selection?.kind === 'wall' && selection.roomId === room.id && selection.index === i;
           return (
             <line
               key={i}
@@ -658,9 +746,14 @@ export default function FloorPlanEditor() {
               y1={Y(a.y)}
               x2={X(b.x)}
               y2={Y(b.y)}
-              className={open ? 'room-wall-open' : 'room-wall'}
-              strokeWidth={open ? 2 : px(WALL_T)}
-              pointerEvents="none"
+              className={`${open ? 'room-wall-open' : 'room-wall'} ${isSelWall ? 'wall-selected' : ''}`}
+              strokeWidth={Math.max(open ? 4 : px(WALL_T), 6)}
+              style={{ cursor: openingPlacement ? 'copy' : 'pointer' }}
+              onPointerDown={(e) => {
+                if (openingPlacement || placement || tool !== 'select' || e.button !== 0) return;
+                e.stopPropagation();
+                select({ kind: 'wall', roomId: room.id, index: i });
+              }}
             />
           );
         })}
@@ -811,6 +904,47 @@ export default function FloorPlanEditor() {
           );
         })()}
 
+        {/* Fantôme de menuiserie sur le mur détecté, avec cotes de pose */}
+        {openingPlacement && openingPlacement !== 'velux' && openingGhost && (() => {
+          const room = floorRooms.find((r) => r.id === openingGhost.roomId);
+          if (!room) return null;
+          const { a, b } = wallEndpoints(room, openingGhost.wall);
+          const len = dist(a, b);
+          const ux = (b.x - a.x) / len;
+          const uy = (b.y - a.y) / len;
+          const width = OPENING_DEFAULTS[openingPlacement].width;
+          const sx = a.x + ux * openingGhost.offset;
+          const sy = a.y + uy * openingGhost.offset;
+          const ex = sx + ux * width;
+          const ey = sy + uy * width;
+          const cx = X((sx + ex) / 2);
+          const cy = Y((sy + ey) / 2);
+          const angle = (Math.atan2(uy, ux) * 180) / Math.PI;
+          const labelAngle = angle > 90 || angle <= -90 ? angle + 180 : angle;
+          return (
+            <g className="opening-ghost" pointerEvents="none">
+              <g transform={`rotate(${angle} ${cx} ${cy})`}>
+                <rect x={cx - px(width) / 2} y={cy - px(WALL_T)} width={px(width)} height={px(WALL_T) * 2} className="opening-ghost-rect" />
+              </g>
+              <text x={cx} y={cy - px(WALL_T) - 6} className="measure-text" textAnchor="middle" transform={`rotate(${labelAngle} ${cx} ${cy - px(WALL_T) - 6})`}>
+                {formatLength(width)} · à {formatLength(openingGhost.offset)} du coin
+              </text>
+            </g>
+          );
+        })()}
+        {/* Fantôme de Velux au curseur */}
+        {openingPlacement === 'velux' && ghostPos && (
+          <g className="roof-window" pointerEvents="none" opacity={0.8}>
+            <rect
+              x={X(ghostPos.x - ROOF_WINDOW_DEFAULT.width / 2)}
+              y={Y(ghostPos.y - ROOF_WINDOW_DEFAULT.length / 2)}
+              width={px(ROOF_WINDOW_DEFAULT.width)}
+              height={px(ROOF_WINDOW_DEFAULT.length)}
+              className="roof-window-rect"
+            />
+          </g>
+        )}
+
         {drag?.mode === 'measure' && (
           <g className="measure">
             <line x1={X(drag.x0)} y1={Y(drag.y0)} x2={X(drag.x1)} y2={Y(drag.y1)} className="measure-line" />
@@ -836,13 +970,17 @@ export default function FloorPlanEditor() {
         </button>
       </div>
       <div className="plan-hints">
-        {tool === 'addRoom'
-          ? 'Cliquez-glissez pour dessiner une pièce rectangulaire'
-          : tool === 'addPoly'
-            ? 'Cliquez pour poser les sommets · cliquez sur le premier point ou Entrée pour fermer · Échap pour annuler'
-            : tool === 'measure'
-              ? 'Cliquez-glissez pour mesurer une distance'
-              : 'Molette : zoom · Glisser le fond : déplacer · Pièce sélectionnée : glissez les sommets, ◈ scinde un mur, double-clic supprime un sommet'}
+        {openingPlacement
+          ? openingPlacement === 'velux'
+            ? 'Cliquez dans une pièce pour poser la fenêtre de toit · Échap pour annuler'
+            : 'Glissez le long d’un mur : la menuiserie s’y accroche avec ses cotes · clic pour poser · R inverser le sens · Échap annuler'
+          : tool === 'addRoom'
+            ? 'Cliquez-glissez pour dessiner une pièce — un rectangle étroit devient automatiquement un couloir'
+            : tool === 'addPoly'
+              ? 'Tracez les murs point par point (cotes en direct, accrochage 45°) · premier point ou Entrée pour fermer · Échap pour annuler'
+              : tool === 'measure'
+                ? 'Cliquez-glissez pour mesurer une distance'
+                : 'Molette : zoom · Glisser le fond : déplacer · Clic sur un mur : sélectionner la section (Suppr = supprimer) · Pièce : glissez les sommets, ◈ scinde un mur'}
       </div>
     </div>
   );

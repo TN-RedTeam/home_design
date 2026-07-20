@@ -51,6 +51,10 @@ function wallSegments(room: Room, wall: number, len: number): WallSeg[] {
 const LOW_WALL_H = 1.0;
 
 function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode }) {
+  const select = useStore((s) => s.select);
+  const isSelected = useStore(
+    (s) => s.selection?.kind === 'wall' && s.selection.roomId === room.id && s.selection.index === wall
+  );
   const { a, b } = wallEndpoints(room, wall);
   const len = Math.hypot(b.x - a.x, b.y - a.y);
   const allSegs = useMemo(() => wallSegments(room, wall, len), [room, wall, len]);
@@ -58,8 +62,15 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
 
   // Matériau partagé par tous les segments du mur : un seul fondu à piloter.
   const mat = useMemo(
-    () => new THREE.MeshStandardMaterial({ color, roughness: 0.92, transparent: true }),
-    [color]
+    () =>
+      new THREE.MeshStandardMaterial({
+        color,
+        roughness: 0.92,
+        transparent: true,
+        emissive: isSelected ? '#d4a373' : '#000000',
+        emissiveIntensity: isSelected ? 0.3 : 0,
+      }),
+    [color, isSelected]
   );
   const anchorRef = useRef<THREE.Group>(null);
   const extrasRef = useRef<THREE.Group>(null);
@@ -111,6 +122,10 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
             castShadow
             receiveShadow
             material={mat}
+            onClick={(e) => {
+              e.stopPropagation();
+              select({ kind: 'wall', roomId: room.id, index: wall });
+            }}
           >
             <boxGeometry args={[segLen, h, WALL_T]} />
           </mesh>

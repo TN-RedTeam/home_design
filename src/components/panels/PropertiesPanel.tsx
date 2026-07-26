@@ -5,6 +5,7 @@ import type { TextureCategory } from '../../data/textures';
 import { useStore } from '../../store/useStore';
 import type { FloorMaterial, OpeningType, Room, RoomType, TextureRef } from '../../types';
 import {
+  DEFAULT_CEILING_COLOR,
   DEFAULT_TILE_CM,
   FINISH_LABELS,
   FLOOR_LABELS,
@@ -314,6 +315,25 @@ function RoomProps({ room }: { room: Room }) {
         onRotate={(deg) => updateRoom(room.id, { floorTextureRot: deg })}
       />
       <FinishButtons value={room.floorFinish} onChange={(f) => updateRoom(room.id, { floorFinish: f })} />
+
+      <h3>Plafond</h3>
+      <PaintPicker
+        value={room.ceilingColor ?? DEFAULT_CEILING_COLOR}
+        onChange={(hex) => updateRoom(room.id, { ceilingColor: hex })}
+      />
+      <TexturePicker
+        surface="wall"
+        texture={room.ceilingTexture}
+        tileCm={room.ceilingTileCm ?? DEFAULT_TILE_CM}
+        rotation={room.ceilingTextureRot ?? 0}
+        onPick={(ref) => updateRoom(room.id, { ceilingTexture: ref })}
+        onImport={(dataUrl, name) => updateRoom(room.id, { ceilingTexture: { kind: 'custom', dataUrl, name }, ceilingTileCm: room.ceilingTileCm ?? DEFAULT_TILE_CM })}
+        onClear={() => updateRoom(room.id, { ceilingTexture: undefined })}
+        onTile={(cm) => updateRoom(room.id, { ceilingTileCm: cm })}
+        onRotate={(deg) => updateRoom(room.id, { ceilingTextureRot: deg })}
+      />
+      <FinishButtons value={room.ceilingFinish} onChange={(f) => updateRoom(room.id, { ceilingFinish: f })} />
+      <p className="hint">Le plafond s'affiche en 3D dans le mode « Murs : Hauts ».</p>
 
       <h3>Murs</h3>
       <div className="wall-tabs wall-tabs-wrap">

@@ -84,6 +84,8 @@ export interface RoomWall {
   texture?: TextureRef;
   /** Taille réelle du motif de la texture de mur en cm (répétition). */
   tileCm?: number;
+  /** Rotation manuelle du motif de mur, en degrés (multiple de 90). */
+  textureRot?: number;
   /** Finition du mur (mat/satiné/brillant) ; défaut = rendu actuel. */
   finish?: Finish;
 }
@@ -204,6 +206,8 @@ export interface Room {
   floorTexture?: TextureRef;
   /** Taille réelle du motif de la texture de sol en cm (répétition). */
   floorTileCm?: number;
+  /** Rotation manuelle du motif de sol, en degrés (multiple de 90). */
+  floorTextureRot?: number;
   /** Finition du sol (mat/satiné/brillant) ; défaut = rendu actuel. */
   floorFinish?: Finish;
   openings: Opening[];

@@ -67,18 +67,22 @@ function TexturePicker({
   surface,
   texture,
   tileCm,
+  rotation,
   onPick,
   onImport,
   onClear,
   onTile,
+  onRotate,
 }: {
   surface: 'floor' | 'wall';
   texture: TextureRef | undefined;
   tileCm: number;
+  rotation: number;
   onPick: (ref: TextureRef) => void;
   onImport: (dataUrl: string, name: string) => void;
   onClear: () => void;
   onTile: (cm: number) => void;
+  onRotate: (deg: number) => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState('');
@@ -139,19 +143,31 @@ function TexturePicker({
         );
       })}
       {texture && (
-        <label>
-          Taille du motif (cm)
-          <input
-            type="number"
-            min={5}
-            step={1}
-            value={Math.round(tileCm)}
-            onChange={(e) => {
-              const cm = parseFloat(e.target.value);
-              if (Number.isFinite(cm) && cm >= 5) onTile(cm);
-            }}
-          />
-        </label>
+        <div className="dims-row">
+          <label>
+            Taille du motif (cm)
+            <input
+              type="number"
+              min={5}
+              step={1}
+              value={Math.round(tileCm)}
+              onChange={(e) => {
+                const cm = parseFloat(e.target.value);
+                if (Number.isFinite(cm) && cm >= 5) onTile(cm);
+              }}
+            />
+          </label>
+          <label>
+            Orientation
+            <button
+              className="btn btn-sm"
+              title="Pivoter le motif de 90°"
+              onClick={() => onRotate((((rotation + 90) % 360) + 360) % 360)}
+            >
+              ⟳ {(((rotation % 360) + 360) % 360)}°
+            </button>
+          </label>
+        </div>
       )}
     </div>
   );
@@ -294,6 +310,8 @@ function RoomProps({ room }: { room: Room }) {
         onImport={(dataUrl, name) => updateRoom(room.id, { floorTexture: { kind: 'custom', dataUrl, name }, floorTileCm: room.floorTileCm ?? DEFAULT_TILE_CM })}
         onClear={() => updateRoom(room.id, { floorTexture: undefined })}
         onTile={(cm) => updateRoom(room.id, { floorTileCm: cm })}
+        rotation={room.floorTextureRot ?? 0}
+        onRotate={(deg) => updateRoom(room.id, { floorTextureRot: deg })}
       />
       <FinishButtons value={room.floorFinish} onChange={(f) => updateRoom(room.id, { floorFinish: f })} />
 
@@ -354,6 +372,8 @@ function RoomProps({ room }: { room: Room }) {
             onImport={(dataUrl, name) => updateWall(room.id, safeWall, { texture: { kind: 'custom', dataUrl, name }, tileCm: currentWall?.tileCm ?? DEFAULT_TILE_CM })}
             onClear={() => updateWall(room.id, safeWall, { texture: undefined })}
             onTile={(cm) => updateWall(room.id, safeWall, { tileCm: cm })}
+            rotation={currentWall?.textureRot ?? 0}
+            onRotate={(deg) => updateWall(room.id, safeWall, { textureRot: deg })}
           />
           <FinishButtons value={currentWall?.finish} onChange={(f) => updateWall(room.id, safeWall, { finish: f })} />
           <button
@@ -470,6 +490,8 @@ function WallProps({ roomId, index }: { roomId: string; index: number }) {
             onImport={(dataUrl, name) => updateWall(roomId, index, { texture: { kind: 'custom', dataUrl, name }, tileCm: wall.tileCm ?? DEFAULT_TILE_CM })}
             onClear={() => updateWall(roomId, index, { texture: undefined })}
             onTile={(cm) => updateWall(roomId, index, { tileCm: cm })}
+            rotation={wall.textureRot ?? 0}
+            onRotate={(deg) => updateWall(roomId, index, { textureRot: deg })}
           />
           <FinishButtons value={wall.finish} onChange={(f) => updateWall(roomId, index, { finish: f })} />
           <button className="btn btn-danger btn-block" onClick={() => { updateWall(roomId, index, { open: true }); }}>

@@ -132,7 +132,7 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
   const allSegs = useMemo(() => wallSegments(room, wall, len), [room, wall, len]);
   const color = room.walls[wall]?.color ?? '#f4f1ea';
   // Texture de mur (optionnelle), partagée entre tous les segments, à l'échelle réelle.
-  const wallTex = useSurfaceTexture(room.walls[wall]?.texture, (room.walls[wall]?.tileCm ?? DEFAULT_TILE_CM) / 100);
+  const wallTex = useSurfaceTexture(room.walls[wall]?.texture, (room.walls[wall]?.tileCm ?? DEFAULT_TILE_CM) / 100, room.walls[wall]?.textureRot ?? 0);
   const wallFinish = room.walls[wall]?.finish;
   const wallRoughness = wallFinish ? FINISH_ROUGHNESS[wallFinish] : DEFAULT_WALL_ROUGHNESS;
 
@@ -250,7 +250,7 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
 function RoomMesh({ room, selected, wallsMode }: { room: Room; selected: boolean; wallsMode: WallsMode }) {
   const select = useStore((s) => s.select);
   // Texture de sol (optionnelle), répétée à la taille réelle du motif.
-  const floorTex = useSurfaceTexture(room.floorTexture, (room.floorTileCm ?? DEFAULT_TILE_CM) / 100);
+  const floorTex = useSurfaceTexture(room.floorTexture, (room.floorTileCm ?? DEFAULT_TILE_CM) / 100, room.floorTextureRot ?? 0);
 
   const floorGeometry = useMemo(() => {
     const shape = new THREE.Shape();

@@ -7,9 +7,11 @@ import type { WallsMode } from '../../store/useStore';
 import { resolveActiveFloor, useStore } from '../../store/useStore';
 import type { PlacedFurniture, Room } from '../../types';
 import {
+  DEFAULT_ENV_INTENSITY,
   DEFAULT_FLOOR_ROUGHNESS,
   DEFAULT_TILE_CM,
   DEFAULT_WALL_ROUGHNESS,
+  FINISH_ENV_INTENSITY,
   FINISH_ROUGHNESS,
   FLOOR_COLORS,
   SLAB_T,
@@ -59,6 +61,47 @@ function wallSegments(room: Room, wall: number, len: number): WallSeg[] {
 const LOW_WALL_H = 1.0;
 
 /**
+ * Environment map procédurale (aucun HDR distant) : un dégradé équirectangulaire
+ * façon intérieur — plafond clair, murs moyens, sol sombre, avec une bande
+ * lumineuse en haut qui produit un reflet net sur les surfaces brillantes.
+ * Préfiltrée par PMREMGenerator pour un rendu correct à toutes les rugosités,
+ * posée sur `scene.environment` (IBL partagé par tous les matériaux).
+ */
+function SceneEnvironment() {
+  const gl = useThree((s) => s.gl);
+  const scene = useThree((s) => s.scene);
+  useEffect(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    const g = ctx.createLinearGradient(0, 0, 0, 256);
+    g.addColorStop(0.0, '#ffffff'); // zénith : bande lumineuse (reflet spéculaire)
+    g.addColorStop(0.28, '#e6e4de'); // plafond / haut des murs
+    g.addColorStop(0.6, '#b9b6ae'); // murs
+    g.addColorStop(1.0, '#43424a'); // sol sombre
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, 512, 256);
+
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.mapping = THREE.EquirectangularReflectionMapping;
+    tex.colorSpace = THREE.SRGBColorSpace;
+
+    const pmrem = new THREE.PMREMGenerator(gl);
+    const rt = pmrem.fromEquirectangular(tex);
+    scene.environment = rt.texture;
+
+    return () => {
+      scene.environment = null;
+      rt.dispose();
+      tex.dispose();
+      pmrem.dispose();
+    };
+  }, [gl, scene]);
+  return null;
+}
+
+/**
  * Géométrie d'un segment de mur (boîte) dont les UV des deux grandes faces
  * (avant/arrière) sont exprimées en MÈTRES et alignées sur la position du
  * segment le long du mur : `from..from+segLen` horizontalement, `bottom..
@@ -101,6 +144,7 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
         map: wallTex ?? null,
         roughness: wallRoughness,
         metalness: wallFinish === 'brillant' ? 0.1 : 0,
+        envMapIntensity: wallFinish ? FINISH_ENV_INTENSITY[wallFinish] : DEFAULT_ENV_INTENSITY,
         transparent: true,
         emissive: isSelected ? '#d4a373' : '#000000',
         emissiveIntensity: isSelected ? 0.3 : 0,
@@ -243,6 +287,7 @@ function RoomMesh({ room, selected, wallsMode }: { room: Room; selected: boolean
           map={floorTex}
           roughness={room.floorFinish ? FINISH_ROUGHNESS[room.floorFinish] : DEFAULT_FLOOR_ROUGHNESS}
           metalness={room.floorFinish === 'brillant' ? 0.1 : 0}
+          envMapIntensity={room.floorFinish ? FINISH_ENV_INTENSITY[room.floorFinish] : DEFAULT_ENV_INTENSITY}
         />
       </mesh>
       {selected && highlightGeometry && (
@@ -881,7 +926,10 @@ export default function View3D() {
         camera={{ position: [cx + span * 0.7, span * 0.8, cz + span * 1.1], fov: 50 }}
         onPointerMissed={() => select(null)}
       >
-        <ambientLight intensity={0.55} />
+        <SceneEnvironment />
+        {/* Ambiante légèrement réduite : l'IBL de l'environment map fournit désormais
+            une partie de l'éclairage diffus. */}
+        <ambientLight intensity={0.4} />
         <directionalLight
           position={[cx + 8, 14, cz - 6]}
           intensity={1.4}
@@ -889,7 +937,7 @@ export default function View3D() {
           shadow-mapSize-width={2048}
           shadow-mapSize-height={2048}
         />
-        <hemisphereLight args={['#cfd8e8', '#3a3228', 0.5]} />
+        <hemisphereLight args={['#cfd8e8', '#3a3228', 0.4]} />
 
         {visibleFloors.map((fl) => (
           <group key={fl.id} position={[0, offsetOf(fl.id), 0]}>

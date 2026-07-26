@@ -159,6 +159,16 @@ export const FINISH_ROUGHNESS: Record<Finish, number> = {
   brillant: 0.15,
 };
 
+/** Intensité du reflet de l'environment map par finition (plus fort = plus glossy). */
+export const FINISH_ENV_INTENSITY: Record<Finish, number> = {
+  mat: 0.5,
+  satine: 1.2,
+  brillant: 2.2,
+};
+
+/** Reflet d'environnement par défaut (sans finition explicite). */
+export const DEFAULT_ENV_INTENSITY = 0.6;
+
 /** Rugosité par défaut si aucune finition explicite (rendu d'aujourd'hui). */
 export const DEFAULT_FLOOR_ROUGHNESS = 0.85;
 export const DEFAULT_WALL_ROUGHNESS = 0.92;

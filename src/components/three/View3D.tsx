@@ -6,7 +6,14 @@ import * as THREE from 'three';
 import type { WallsMode } from '../../store/useStore';
 import { resolveActiveFloor, useStore } from '../../store/useStore';
 import type { PlacedFurniture, Room } from '../../types';
-import { DEFAULT_TILE_CM, FLOOR_COLORS, SLAB_T } from '../../types';
+import {
+  DEFAULT_FLOOR_ROUGHNESS,
+  DEFAULT_TILE_CM,
+  DEFAULT_WALL_ROUGHNESS,
+  FINISH_ROUGHNESS,
+  FLOOR_COLORS,
+  SLAB_T,
+} from '../../types';
 import { useSurfaceTexture } from '../../utils/textures';
 import { checkPlacement, planBounds, snapTo, wallEndpoints } from '../../utils/geometry';
 
@@ -83,6 +90,8 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
   const color = room.walls[wall]?.color ?? '#f4f1ea';
   // Texture de mur (optionnelle), partagée entre tous les segments, à l'échelle réelle.
   const wallTex = useSurfaceTexture(room.walls[wall]?.texture, (room.walls[wall]?.tileCm ?? DEFAULT_TILE_CM) / 100);
+  const wallFinish = room.walls[wall]?.finish;
+  const wallRoughness = wallFinish ? FINISH_ROUGHNESS[wallFinish] : DEFAULT_WALL_ROUGHNESS;
 
   // Matériau partagé par tous les segments du mur : un seul fondu à piloter.
   const mat = useMemo(
@@ -90,12 +99,13 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
       new THREE.MeshStandardMaterial({
         color: wallTex ? '#ffffff' : color,
         map: wallTex ?? null,
-        roughness: 0.92,
+        roughness: wallRoughness,
+        metalness: wallFinish === 'brillant' ? 0.1 : 0,
         transparent: true,
         emissive: isSelected ? '#d4a373' : '#000000',
         emissiveIntensity: isSelected ? 0.3 : 0,
       }),
-    [color, isSelected, wallTex]
+    [color, isSelected, wallTex, wallRoughness, wallFinish]
   );
 
   // Géométries des segments avec UV en mètres (mémoïsées), disposées au changement.
@@ -231,7 +241,8 @@ function RoomMesh({ room, selected, wallsMode }: { room: Room; selected: boolean
           key={floorTex ? floorTex.uuid : 'plain'}
           color={floorTex ? '#ffffff' : FLOOR_COLORS[room.floor]}
           map={floorTex}
-          roughness={0.85}
+          roughness={room.floorFinish ? FINISH_ROUGHNESS[room.floorFinish] : DEFAULT_FLOOR_ROUGHNESS}
+          metalness={room.floorFinish === 'brillant' ? 0.1 : 0}
         />
       </mesh>
       {selected && highlightGeometry && (

@@ -125,6 +125,18 @@ export const FLOOR_COLORS: Record<FloorMaterial, string> = {
   tomette: '#b3593a',
 };
 
+/**
+ * Référence à une texture image : soit un revêtement de la bibliothèque
+ * fournie, soit une image importée par l'utilisateur (data-URL base64,
+ * stockée dans le projet comme les photos produit).
+ */
+export type TextureRef =
+  | { kind: 'library'; id: string }
+  | { kind: 'custom'; dataUrl: string; name?: string };
+
+/** Taille de motif par défaut (cm) quand une texture est appliquée. */
+export const DEFAULT_TILE_CM = 60;
+
 /** Niveau de la maison (rez-de-chaussée, étage 1…). */
 export interface Floor {
   id: ID;
@@ -152,6 +164,10 @@ export interface Room {
   /** Hauteur sous plafond en m. */
   height: number;
   floor: FloorMaterial;
+  /** Texture image du sol (optionnelle) ; sans elle, rendu couleur unie du matériau. */
+  floorTexture?: TextureRef;
+  /** Taille réelle du motif de la texture de sol en cm (répétition). */
+  floorTileCm?: number;
   openings: Opening[];
   /** Fenêtres de toit (Velux). */
   roofWindows: RoofWindow[];

@@ -412,6 +412,44 @@
 .rotate-buttons { display: flex; gap: 4px; }
 .rotate-buttons .btn { flex: 1; padding: 5px 2px; font-size: 11px; }
 
+.texture-picker { display: flex; flex-direction: column; gap: 8px; }
+.texture-actions { display: flex; gap: 6px; }
+.texture-actions .btn { flex: 1; }
+.texture-current {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #1c1e22;
+  border: 1px solid #33363e;
+  border-radius: 8px;
+  padding: 6px;
+}
+.texture-current img { width: 34px; height: 34px; border-radius: 5px; object-fit: cover; }
+.texture-current span { font-size: 12px; color: #c9c5bc; }
+.texture-cat-name {
+  color: #7d8494;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.texture-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 5px;
+  margin-top: 4px;
+}
+.texture-swatch {
+  aspect-ratio: 1;
+  border-radius: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  background-size: 130%;
+  background-position: center;
+  cursor: pointer;
+  padding: 0;
+}
+.texture-swatch:hover { border-color: rgba(255, 255, 255, 0.5); }
+.texture-swatch.active { border-color: #d4a373; box-shadow: 0 0 0 2px rgba(212, 163, 115, 0.4); }
+
 .wall-tabs { display: flex; gap: 4px; }
 .wall-tabs button {
   flex: 1;

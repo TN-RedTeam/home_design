@@ -127,6 +127,93 @@ export function wallAngle(room: Room, wall: number): number {
   return (Math.atan2(b.y - a.y, b.x - a.x) * 180) / Math.PI;
 }
 
+/** Largeur minimale d'une ouverture (30 cm). */
+export const MIN_OPENING = 0.3;
+
+interface OpeningLike {
+  id: string;
+  wall: number;
+  offset: number;
+  width: number;
+  height: number;
+  sillHeight: number;
+  type: string;
+}
+
+/** Une porte n'a pas d'allège (bas au sol). */
+function isDoor(type: string): boolean {
+  return type === 'porte' || type === 'porte_entree' || type === 'porte_fenetre';
+}
+
+/**
+ * Bornes libres [low, high] le long du mur autour de la position `center`,
+ * limitées par les ouvertures voisines (celles à gauche/droite de `center`)
+ * et par les extrémités du mur [0, wallLen].
+ */
+function freeSpan(room: Room, wall: number, wallLen: number, center: number, ignoreId: string): { low: number; high: number } {
+  let low = 0;
+  let high = wallLen;
+  for (const o of room.openings) {
+    if (o.id === ignoreId || o.wall !== wall) continue;
+    const oEnd = o.offset + o.width;
+    if (oEnd <= center) low = Math.max(low, oEnd); // voisine à gauche
+    else if (o.offset >= center) high = Math.min(high, o.offset); // voisine à droite
+    // (une voisine chevauchant center ne devrait pas exister sur un mur bien formé)
+  }
+  return { low, high };
+}
+
+/**
+ * Redimensionnement d'un bord d'ouverture À LA SOURIS : le bord opposé est
+ * ancré, le bord tiré s'arrête au bord du mur ou d'une voisine, la largeur
+ * rogne (jamais de glissement). `along` = position visée le long du mur (m).
+ */
+export function edgeResizeOpening(
+  room: Room,
+  o: OpeningLike,
+  edge: 'start' | 'end',
+  along: number
+): { offset: number; width: number } {
+  const wallLen = wallLength(room, o.wall);
+  const start = o.offset;
+  const end = o.offset + o.width;
+  if (edge === 'end') {
+    // start ancré ; le bord droit bute sur la voisine de droite ou le mur.
+    const { high } = freeSpan(room, o.wall, wallLen, start + 1e-6, o.id);
+    const newEnd = clamp(along, start + MIN_OPENING, high);
+    return { offset: start, width: newEnd - start };
+  }
+  // start tiré ; end ancré ; bute sur la voisine de gauche ou 0.
+  const { low } = freeSpan(room, o.wall, wallLen, end - 1e-6, o.id);
+  const newStart = clamp(along, low, end - MIN_OPENING);
+  return { offset: newStart, width: end - newStart };
+}
+
+/**
+ * Corrige une ouverture après une édition clavier ou un changement externe
+ * (mur, position) : applique les 3 clamps. Comportement « translate-pour-
+ * rentrer » — si l'ouverture se retrouve sur une voisine ou hors du mur, on
+ * la ramène dans le trou libre le plus proche (et on rogne seulement si ce
+ * trou est plus étroit que la largeur). L'allège des portes est forcée à 0.
+ */
+export function fitOpening(room: Room, o: OpeningLike): { offset: number; width: number; height: number; sillHeight: number } {
+  const wallLen = wallLength(room, o.wall);
+  // Largeur : min 30 cm, jamais plus large que le mur entier.
+  let width = clamp(o.width, MIN_OPENING, Math.max(MIN_OPENING, wallLen));
+  // Trou libre autour du centre actuel de l'ouverture.
+  const center = clamp(o.offset + width / 2, 0, wallLen);
+  const { low, high } = freeSpan(room, o.wall, wallLen, center, o.id);
+  const gap = high - low;
+  if (width > gap) width = Math.max(MIN_OPENING, gap);
+  // Translate dans [low, high - width].
+  const offset = clamp(o.offset, low, Math.max(low, high - width));
+  // Hauteur et allège (verticales).
+  const roomH = room.height;
+  const sillHeight = isDoor(o.type) ? 0 : clamp(o.sillHeight, 0, Math.max(0, roomH - MIN_OPENING));
+  const height = clamp(o.height, MIN_OPENING, Math.max(MIN_OPENING, roomH - sillHeight));
+  return { offset, width, height, sillHeight };
+}
+
 /**
  * Segment d'une ouverture le long de son mur, dans le repère du plan (mètres),
  * avec l'angle du mur pour l'orientation du dessin.

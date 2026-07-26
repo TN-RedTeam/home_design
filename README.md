@@ -68,9 +68,10 @@ et visualisez le résultat en 3D — avant d'acheter ou de repeindre quoi que ce
 - Couleur de peinture **par mur** (N/S/E/O), 6 palettes déco professionnelles + code hexadécimal
   libre (relevez la référence couleur sur le site d'une marque de peinture)
 - 7 matériaux de sol (parquets, carrelages, béton ciré, tomettes…)
-- **Textures image** (façon Sims) sur les sols **et** les murs : bibliothèque fournie (parquets,
-  carrelages, bétons & pierres, papiers peints) **ou** import de vos propres images ; réglage de la
-  **taille réelle du motif** (cm) — les carreaux/lames ne sont jamais étirés, quelle que soit la pièce
+- **Textures image** (façon Sims) sur les sols, les murs **et les plafonds** : bibliothèque fournie
+  (parquets, carrelages, bétons & pierres, papiers peints) **ou** import de vos propres images ;
+  réglage de la **taille réelle du motif** (cm) — les carreaux/lames ne sont jamais étirés
+- Le **plafond** (couleur ou texture + finition) s'affiche en 3D dans le mode « Murs : Hauts »
 - Rendu 3D temps réel : texture répétée à la bonne échelle, orientée selon le mur, avec les
   ouvertures qui restent percées (la texture n'habille ni les vitrages ni les vantaux)
 - **Rotation du motif** par surface, par pas de 90° (orienter les lames de parquet, les rayures…)

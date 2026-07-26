@@ -213,7 +213,20 @@ export interface Room {
   openings: Opening[];
   /** Fenêtres de toit (Velux). */
   roofWindows: RoofWindow[];
+  /** Couleur du plafond (défaut blanc cassé si absent). */
+  ceilingColor?: string;
+  /** Texture image du plafond (optionnelle). */
+  ceilingTexture?: TextureRef;
+  /** Taille réelle du motif de la texture de plafond en cm. */
+  ceilingTileCm?: number;
+  /** Rotation manuelle du motif de plafond, en degrés (multiple de 90). */
+  ceilingTextureRot?: number;
+  /** Finition du plafond (mat/satiné/brillant) ; défaut = rendu actuel. */
+  ceilingFinish?: Finish;
 }
+
+/** Couleur de plafond par défaut. */
+export const DEFAULT_CEILING_COLOR = '#f4f1ea';
 
 export type FurnitureCategory =
   | 'canape'

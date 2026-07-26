@@ -7,6 +7,7 @@ import type { WallsMode } from '../../store/useStore';
 import { resolveActiveFloor, useStore } from '../../store/useStore';
 import type { PlacedFurniture, Room } from '../../types';
 import {
+  DEFAULT_CEILING_COLOR,
   DEFAULT_ENV_INTENSITY,
   DEFAULT_FLOOR_ROUGHNESS,
   DEFAULT_TILE_CM,
@@ -251,6 +252,8 @@ function RoomMesh({ room, selected, wallsMode }: { room: Room; selected: boolean
   const select = useStore((s) => s.select);
   // Texture de sol (optionnelle), répétée à la taille réelle du motif.
   const floorTex = useSurfaceTexture(room.floorTexture, (room.floorTileCm ?? DEFAULT_TILE_CM) / 100, room.floorTextureRot ?? 0);
+  // Texture de plafond (optionnelle). Le plafond n'est montré qu'en mode « Hauts ».
+  const ceilingTex = useSurfaceTexture(room.ceilingTexture, (room.ceilingTileCm ?? DEFAULT_TILE_CM) / 100, room.ceilingTextureRot ?? 0);
 
   const floorGeometry = useMemo(() => {
     const shape = new THREE.Shape();
@@ -259,6 +262,13 @@ function RoomMesh({ room, selected, wallsMode }: { room: Room; selected: boolean
     const geo = new THREE.ExtrudeGeometry(shape, { depth: FLOOR_T, bevelEnabled: false });
     geo.computeVertexNormals();
     return geo;
+  }, [room.points]);
+
+  const ceilingGeometry = useMemo(() => {
+    const shape = new THREE.Shape();
+    room.points.forEach((p, i) => (i === 0 ? shape.moveTo(p.x, p.y) : shape.lineTo(p.x, p.y)));
+    shape.closePath();
+    return new THREE.ShapeGeometry(shape);
   }, [room.points]);
 
   const highlightGeometry = useMemo(() => {
@@ -298,6 +308,21 @@ function RoomMesh({ room, selected, wallsMode }: { room: Room; selected: boolean
       {room.points.map((_, i) => (
         <Wall key={i} room={room} wall={i} mode={wallsMode} />
       ))}
+      {/* Plafond : visible seulement en mode « Hauts » (sinon il masquerait la
+          vue de dessus). UV en mètres (ShapeGeometry) → texture à l'échelle réelle. */}
+      {wallsMode === 'up' && (
+        <mesh geometry={ceilingGeometry} rotation={[Math.PI / 2, 0, 0]} position={[0, room.height, 0]}>
+          <meshStandardMaterial
+            key={ceilingTex ? ceilingTex.uuid : 'plain'}
+            color={ceilingTex ? '#ffffff' : (room.ceilingColor ?? DEFAULT_CEILING_COLOR)}
+            map={ceilingTex}
+            side={THREE.DoubleSide}
+            roughness={room.ceilingFinish ? FINISH_ROUGHNESS[room.ceilingFinish] : DEFAULT_WALL_ROUGHNESS}
+            metalness={room.ceilingFinish === 'brillant' ? 0.1 : 0}
+            envMapIntensity={room.ceilingFinish ? FINISH_ENV_INTENSITY[room.ceilingFinish] : DEFAULT_ENV_INTENSITY}
+          />
+        </mesh>
+      )}
       {/* Fenêtres de toit : verrière lumineuse posée au niveau du plafond. */}
       {room.roofWindows.map((rw) => (
         <group key={rw.id} position={[rw.x, room.height + 0.02, rw.y]}>

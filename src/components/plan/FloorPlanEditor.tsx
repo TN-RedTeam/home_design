@@ -13,6 +13,7 @@ import {
   polygonArea,
   polygonCentroid,
   rectPoints,
+  rectSize,
   snapTo,
   translatePoints,
   wallEndpoints,
@@ -40,6 +41,8 @@ type DragState =
   | { mode: 'pan'; startX: number; startY: number; viewX: number; viewY: number }
   | { mode: 'room'; id: string; startPointer: Vec2; startPoints: Vec2[] }
   | { mode: 'vertex'; roomId: string; index: number }
+  /** Redimensionnement d'une pièce rectangulaire via une poignée d'arête/coin. */
+  | { mode: 'resize-rect'; roomId: string; hx: -1 | 0 | 1; hy: -1 | 0 | 1; anchor: { x: number; y: number; width: number; length: number } }
   | { mode: 'furniture'; id: string; dx: number; dy: number }
   | { mode: 'rotate'; id: string; cx: number; cy: number }
   | { mode: 'opening'; roomId: string; id: string }
@@ -332,6 +335,23 @@ export default function FloorPlanEditor() {
         updateRoom(d.roomId, { points: room.points.map((pt, i) => (i === d.index ? p : pt)) });
         break;
       }
+      case 'resize-rect': {
+        const a = d.anchor;
+        // Bords opposés fixes ; le curseur (accroché grille) déplace le bord tiré.
+        const sx = snapTo(w.x, snap);
+        const sy = snapTo(w.y, snap);
+        let left = a.x;
+        let right = a.x + a.width;
+        let top = a.y;
+        let bottom = a.y + a.length;
+        if (d.hx === -1) left = Math.min(sx, right - MIN_SIDE);
+        if (d.hx === 1) right = Math.max(sx, left + MIN_SIDE);
+        if (d.hy === -1) top = Math.min(sy, bottom - MIN_SIDE);
+        if (d.hy === 1) bottom = Math.max(sy, top + MIN_SIDE);
+        // Ancre le nouveau coin haut-gauche puis applique largeur/longueur.
+        updateRoom(d.roomId, { points: rectPoints(left, top, right - left, bottom - top) });
+        break;
+      }
       case 'furniture':
         updateFurniture(d.id, { x: snapTo(w.x - d.dx, snap), y: snapTo(w.y - d.dy, snap) });
         break;
@@ -601,6 +621,53 @@ export default function FloorPlanEditor() {
     </g>
   );
 
+  /**
+   * Poignées de redimensionnement d'une pièce rectangulaire (4 coins + 4 arêtes)
+   * + cotes largeur × longueur pendant le glissement.
+   */
+  const renderRectHandles = (room: Room, rect: { x: number; y: number; width: number; length: number }) => {
+    const handles: { hx: -1 | 0 | 1; hy: -1 | 0 | 1; cursor: string }[] = [
+      { hx: -1, hy: -1, cursor: 'nwse-resize' },
+      { hx: 1, hy: -1, cursor: 'nesw-resize' },
+      { hx: 1, hy: 1, cursor: 'nwse-resize' },
+      { hx: -1, hy: 1, cursor: 'nesw-resize' },
+      { hx: 0, hy: -1, cursor: 'ns-resize' },
+      { hx: 1, hy: 0, cursor: 'ew-resize' },
+      { hx: 0, hy: 1, cursor: 'ns-resize' },
+      { hx: -1, hy: 0, cursor: 'ew-resize' },
+    ];
+    const cxWorld = (hx: -1 | 0 | 1) => rect.x + rect.width * (hx + 1) / 2;
+    const cyWorld = (hy: -1 | 0 | 1) => rect.y + rect.length * (hy + 1) / 2;
+    const resizing = drag?.mode === 'resize-rect' && drag.roomId === room.id;
+    return (
+      <g className="room-handles">
+        {resizing && (
+          <text x={X(rect.x + rect.width / 2)} y={Y(rect.y + rect.length / 2)} className="dim-text" textAnchor="middle">
+            {formatLength(rect.width)} × {formatLength(rect.length)}
+          </text>
+        )}
+        {handles.map((h) => (
+          <rect
+            key={`${h.hx}:${h.hy}`}
+            x={X(cxWorld(h.hx)) - 5}
+            y={Y(cyWorld(h.hy)) - 5}
+            width={10}
+            height={10}
+            className="resize-handle"
+            style={{ cursor: h.cursor }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              svgRef.current!.setPointerCapture(e.pointerId);
+              setDrag({ mode: 'resize-rect', roomId: room.id, hx: h.hx, hy: h.hy, anchor: rect });
+            }}
+          >
+            <title>Glisser pour redimensionner la pièce</title>
+          </rect>
+        ))}
+      </g>
+    );
+  };
+
   /** Fenêtre de toit : rectangle pointillé avec croix, posé sur le plafond de la pièce. */
   const renderRoofWindow = (room: Room, rw: Room['roofWindows'][number]) => {
     const isSel = selection?.kind === 'roofWindow' && selection.id === rw.id;
@@ -811,7 +878,12 @@ export default function FloorPlanEditor() {
           </g>
         )}
         {isSel && renderDims(room)}
-        {isSel && renderRoomHandles(room)}
+        {isSel && (() => {
+          // Pièce rectangulaire : poignées de redimensionnement largeur/longueur.
+          // Forme libre : poignées de sommets (comportement inchangé).
+          const rect = rectSize(room.points);
+          return rect ? renderRectHandles(room, rect) : renderRoomHandles(room);
+        })()}
       </g>
     );
   };

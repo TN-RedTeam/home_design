@@ -6,7 +6,8 @@ import * as THREE from 'three';
 import type { WallsMode } from '../../store/useStore';
 import { resolveActiveFloor, useStore } from '../../store/useStore';
 import type { PlacedFurniture, Room } from '../../types';
-import { FLOOR_COLORS, SLAB_T } from '../../types';
+import { DEFAULT_TILE_CM, FLOOR_COLORS, SLAB_T } from '../../types';
+import { useSurfaceTexture } from '../../utils/textures';
 import { checkPlacement, planBounds, snapTo, wallEndpoints } from '../../utils/geometry';
 
 type OrbitControlsRef = React.ComponentRef<typeof OrbitControls>;
@@ -169,6 +170,8 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
 
 function RoomMesh({ room, selected, wallsMode }: { room: Room; selected: boolean; wallsMode: WallsMode }) {
   const select = useStore((s) => s.select);
+  // Texture de sol (optionnelle), répétée à la taille réelle du motif.
+  const floorTex = useSurfaceTexture(room.floorTexture, (room.floorTileCm ?? DEFAULT_TILE_CM) / 100);
 
   const floorGeometry = useMemo(() => {
     const shape = new THREE.Shape();
@@ -199,7 +202,12 @@ function RoomMesh({ room, selected, wallsMode }: { room: Room; selected: boolean
           select({ kind: 'room', id: room.id });
         }}
       >
-        <meshStandardMaterial color={FLOOR_COLORS[room.floor]} roughness={0.85} />
+        <meshStandardMaterial
+          key={floorTex ? floorTex.uuid : 'plain'}
+          color={floorTex ? '#ffffff' : FLOOR_COLORS[room.floor]}
+          map={floorTex}
+          roughness={0.85}
+        />
       </mesh>
       {selected && highlightGeometry && (
         <mesh geometry={highlightGeometry} rotation={[Math.PI / 2, 0, 0]} position={[0, 0.012, 0]}>

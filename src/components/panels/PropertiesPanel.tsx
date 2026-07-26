@@ -1,8 +1,11 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { PAINT_PALETTES } from '../../data/palettes';
+import { TEXTURE_LIBRARY, TEXTURE_CATEGORY_LABELS, textureUrl } from '../../data/textures';
+import type { TextureCategory } from '../../data/textures';
 import { useStore } from '../../store/useStore';
-import type { FloorMaterial, OpeningType, Room, RoomType } from '../../types';
+import type { FloorMaterial, OpeningType, Room, RoomType, TextureRef } from '../../types';
 import {
+  DEFAULT_TILE_CM,
   FLOOR_LABELS,
   OPENING_DEFAULTS,
   OPENING_LABELS,
@@ -13,6 +16,127 @@ import {
 } from '../../types';
 import { polygonCentroid } from '../../utils/geometry';
 import { polygonArea, rectSize, wallLength, withEdgeLength } from '../../utils/geometry';
+
+/** Lit une image (fichier), la redimensionne à ≤ 512 px et renvoie un data-URL JPEG. */
+function readTextureFile(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('Lecture impossible'));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('Image invalide'));
+      img.onload = () => {
+        const max = 512;
+        const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.naturalWidth * scale));
+        canvas.height = Math.max(1, Math.round(img.naturalHeight * scale));
+        canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', 0.85));
+      };
+      img.src = reader.result as string;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+/**
+ * Galerie de textures (bibliothèque filtrée par surface + import perso) et
+ * réglage de la taille du motif. Générique pour sols et murs (étape B).
+ */
+function TexturePicker({
+  surface,
+  texture,
+  tileCm,
+  onPick,
+  onImport,
+  onClear,
+  onTile,
+}: {
+  surface: 'floor' | 'wall';
+  texture: TextureRef | undefined;
+  tileCm: number;
+  onPick: (ref: TextureRef) => void;
+  onImport: (dataUrl: string, name: string) => void;
+  onClear: () => void;
+  onTile: (cm: number) => void;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState('');
+  const cats = Object.keys(TEXTURE_CATEGORY_LABELS) as TextureCategory[];
+  const activeUrl = texture ? textureUrl(texture) : null;
+
+  return (
+    <div className="texture-picker">
+      <div className="texture-actions">
+        <button className="btn btn-sm" onClick={() => fileRef.current?.click()}>Importer une texture</button>
+        <button className="btn btn-sm" onClick={onClear} disabled={!texture}>Aucune texture</button>
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={async (e) => {
+          const f = e.target.files?.[0];
+          if (!f) return;
+          try {
+            onImport(await readTextureFile(f), f.name.replace(/\.[^.]+$/, ''));
+            setError('');
+          } catch {
+            setError('Impossible de lire cette image.');
+          }
+          e.target.value = '';
+        }}
+      />
+      {error && <p className="error">{error}</p>}
+      {texture?.kind === 'custom' && (
+        <div className="texture-current">
+          <img src={texture.dataUrl} alt={texture.name ?? 'Texture importée'} />
+          <span>{texture.name ?? 'Texture importée'}</span>
+        </div>
+      )}
+      {cats.map((cat) => {
+        const items = TEXTURE_LIBRARY.filter((t) => t.category === cat && t.surfaces.includes(surface));
+        if (items.length === 0) return null;
+        return (
+          <div key={cat} className="texture-cat">
+            <span className="texture-cat-name">{TEXTURE_CATEGORY_LABELS[cat]}</span>
+            <div className="texture-grid">
+              {items.map((t) => (
+                <button
+                  key={t.id}
+                  className={`texture-swatch ${activeUrl === t.url ? 'active' : ''}`}
+                  title={`${t.name} · motif ~${t.suggestedTileCm} cm`}
+                  style={{ backgroundImage: `url("${t.url}")` }}
+                  onClick={() => {
+                    onPick({ kind: 'library', id: t.id });
+                    onTile(t.suggestedTileCm);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        );
+      })}
+      {texture && (
+        <label>
+          Taille du motif (cm)
+          <input
+            type="number"
+            min={5}
+            step={1}
+            value={Math.round(tileCm)}
+            onChange={(e) => {
+              const cm = parseFloat(e.target.value);
+              if (Number.isFinite(cm) && cm >= 5) onTile(cm);
+            }}
+          />
+        </label>
+      )}
+    </div>
+  );
+}
 
 
 /** Champ dimension : édition en cm, stockage en m. */
@@ -134,7 +258,7 @@ function RoomProps({ room }: { room: Room }) {
           : 'Sur le plan, glissez les sommets pour modifier la forme ; le bouton ◈ au milieu d’un mur le scinde en deux.'}
       </p>
       <label>
-        Sol
+        Sol {room.floorTexture ? '(couleur de repli)' : ''}
         <select value={room.floor} onChange={(e) => updateRoom(room.id, { floor: e.target.value as FloorMaterial })}>
           {(Object.keys(FLOOR_LABELS) as FloorMaterial[]).map((f) => (
             <option key={f} value={f}>
@@ -143,6 +267,15 @@ function RoomProps({ room }: { room: Room }) {
           ))}
         </select>
       </label>
+      <TexturePicker
+        surface="floor"
+        texture={room.floorTexture}
+        tileCm={room.floorTileCm ?? DEFAULT_TILE_CM}
+        onPick={(ref) => updateRoom(room.id, { floorTexture: ref })}
+        onImport={(dataUrl, name) => updateRoom(room.id, { floorTexture: { kind: 'custom', dataUrl, name }, floorTileCm: room.floorTileCm ?? DEFAULT_TILE_CM })}
+        onClear={() => updateRoom(room.id, { floorTexture: undefined })}
+        onTile={(cm) => updateRoom(room.id, { floorTileCm: cm })}
+      />
 
       <h3>Murs</h3>
       <div className="wall-tabs wall-tabs-wrap">

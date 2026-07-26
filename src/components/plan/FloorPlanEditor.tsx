@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { makeWalls, resolveActiveFloor, useStore } from '../../store/useStore';
 import type { Opening, PlacedFurniture, Room, Vec2 } from '../../types';
-import { FLOOR_COLORS, OPENING_DEFAULTS, ROOF_WINDOW_DEFAULT, formatArea, formatLength } from '../../types';
+import { DEFAULT_TILE_CM, FLOOR_COLORS, OPENING_DEFAULTS, ROOF_WINDOW_DEFAULT, formatArea, formatLength } from '../../types';
+import { textureUrl } from '../../data/textures';
 import {
   checkPlacement,
   clamp,
@@ -877,11 +878,28 @@ export default function FloorPlanEditor() {
     const isSel = selection?.kind === 'room' && selection.id === room.id;
     const centroid = polygonCentroid(room.points);
     const pathPoints = room.points.map((p) => `${X(p.x)},${Y(p.y)}`).join(' ');
+    // Aperçu 2D de la texture de sol : motif épinglé au repère monde (suit pan/zoom).
+    const texUrl = room.floorTexture ? textureUrl(room.floorTexture) : null;
+    const tilePx = px((room.floorTileCm ?? DEFAULT_TILE_CM) / 100);
+    const patternId = `floor-tex-${room.id}`;
     return (
       <g key={room.id} className={`room ${isSel ? 'selected' : ''}`}>
+        {texUrl && tilePx > 2 && (
+          <defs>
+            <pattern
+              id={patternId}
+              patternUnits="userSpaceOnUse"
+              width={tilePx}
+              height={tilePx}
+              patternTransform={`translate(${X(0)} ${Y(0)})`}
+            >
+              <image href={texUrl} width={tilePx} height={tilePx} preserveAspectRatio="none" />
+            </pattern>
+          </defs>
+        )}
         <polygon
           points={pathPoints}
-          fill={FLOOR_COLORS[room.floor]}
+          fill={texUrl && tilePx > 2 ? `url(#${patternId})` : FLOOR_COLORS[room.floor]}
           className="room-floor"
           onPointerDown={(e) => startRoomDrag(e, room)}
         />

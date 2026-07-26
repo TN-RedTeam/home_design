@@ -12,7 +12,7 @@ import {
   formatLength,
 } from '../../types';
 import { polygonCentroid } from '../../utils/geometry';
-import { polygonArea, wallLength, withEdgeLength } from '../../utils/geometry';
+import { polygonArea, rectSize, wallLength, withEdgeLength } from '../../utils/geometry';
 
 
 /** Champ dimension : édition en cm, stockage en m. */
@@ -76,6 +76,7 @@ function PaintPicker({ value, onChange }: { value: string; onChange: (hex: strin
 function RoomProps({ room }: { room: Room }) {
   const updateRoom = useStore((s) => s.updateRoom);
   const removeRoom = useStore((s) => s.removeRoom);
+  const resizeRoomRect = useStore((s) => s.resizeRoomRect);
   const updateWall = useStore((s) => s.updateWall);
   const addOpening = useStore((s) => s.addOpening);
   const addRoofWindow = useStore((s) => s.addRoofWindow);
@@ -86,6 +87,7 @@ function RoomProps({ room }: { room: Room }) {
   const n = room.points.length;
   const safeWall = Math.min(wall, n - 1);
   const currentWall = room.walls[safeWall];
+  const rect = rectSize(room.points);
 
   const addOp = () => {
     const d = OPENING_DEFAULTS[openingType];
@@ -119,9 +121,17 @@ function RoomProps({ room }: { room: Room }) {
       <div className="dims-row">
         <CmField label="H. plafond (cm)" value={room.height} min={1.8} onChange={(v) => updateRoom(room.id, { height: v })} />
       </div>
+      {rect && (
+        <div className="dims-row">
+          <CmField label="Largeur (cm)" value={rect.width} min={0.2} onChange={(v) => resizeRoomRect(room.id, v, rect.length)} />
+          <CmField label="Longueur (cm)" value={rect.length} min={0.2} onChange={(v) => resizeRoomRect(room.id, rect.width, v)} />
+        </div>
+      )}
       <p className="hint">
-        Surface : {formatArea(polygonArea(room.points))} · {n} murs. Sur le plan, glissez les sommets pour
-        modifier la forme ; le bouton ◈ au milieu d'un mur le scinde en deux.
+        Surface : {formatArea(polygonArea(room.points))} · {n} murs.{' '}
+        {rect
+          ? 'Sur le plan, glissez les poignées carrées pour redimensionner, ou saisissez les cotes ci-dessus.'
+          : 'Sur le plan, glissez les sommets pour modifier la forme ; le bouton ◈ au milieu d’un mur le scinde en deux.'}
       </p>
       <label>
         Sol

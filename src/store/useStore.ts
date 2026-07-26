@@ -17,7 +17,7 @@ import type {
   ViewMode,
 } from '../types';
 import { uid } from '../types';
-import { clamp, dist, rectPoints, wallLength } from '../utils/geometry';
+import { clamp, dist, rectPoints, rectSize, wallLength } from '../utils/geometry';
 
 const DEFAULT_WALL = '#f4f1ea';
 
@@ -317,6 +317,11 @@ interface AppState {
   addRoom: (points: Vec2[], partial?: Partial<Omit<Room, 'points'>>) => ID;
   updateRoom: (id: ID, patch: Partial<Room>) => void;
   removeRoom: (id: ID) => void;
+  /**
+   * Redimensionne une pièce rectangulaire (coin haut-gauche ancré), en gardant
+   * murs et ouvertures. Sans effet sur les pièces en forme libre.
+   */
+  resizeRoomRect: (id: ID, width: number, length: number) => void;
   updateWall: (roomId: ID, wall: number, patch: Partial<RoomWall>) => void;
   /** Insère un sommet au milieu du mur `wall` (le mur est scindé en deux). */
   insertVertex: (roomId: ID, wall: number) => void;
@@ -486,6 +491,28 @@ export const useStore = create<AppState>()(
           }),
           selection: null,
         }),
+      resizeRoomRect: (id, width, length) =>
+        set({
+          project: touch({
+            ...get().project,
+            rooms: get().project.rooms.map((r) => {
+              if (r.id !== id) return r;
+              const rect = rectSize(r.points);
+              if (!rect) return r; // forme libre : non concernée
+              const w = Math.max(0.2, width);
+              const l = Math.max(0.2, length);
+              const points = rectPoints(rect.x, rect.y, w, l);
+              // Longueur des murs après redimensionnement : murs 0/2 = largeur, 1/3 = longueur.
+              const wallLen = (i: number) => (i % 2 === 0 ? w : l);
+              const openings = r.openings.map((o) => ({
+                ...o,
+                offset: clamp(o.offset, 0, Math.max(0, wallLen(o.wall) - o.width)),
+              }));
+              return { ...r, points, openings };
+            }),
+          }),
+        }),
+
       updateWall: (roomId, wall, patch) =>
         set({
           project: touch({

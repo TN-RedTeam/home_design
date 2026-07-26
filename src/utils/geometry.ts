@@ -26,6 +26,33 @@ export function rectPoints(x: number, y: number, w: number, l: number): Vec2[] {
   ];
 }
 
+/**
+ * Si le polygone est un rectangle aligné sur les axes (4 sommets, arêtes
+ * strictement horizontales/verticales), renvoie sa taille et son coin
+ * haut-gauche ; sinon `null`. Sert à proposer l'édition largeur/longueur.
+ */
+export function rectSize(points: Vec2[]): { x: number; y: number; width: number; length: number } | null {
+  if (points.length !== 4) return null;
+  const eps = 1e-4;
+  // Chaque arête doit être strictement horizontale ou verticale, et alterner
+  // d'orientation avec la suivante (H,V,H,V ou V,H,V,H).
+  for (let i = 0; i < 4; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % 4];
+    const c = points[(i + 2) % 4];
+    const horizontal = Math.abs(a.y - b.y) < eps && Math.abs(a.x - b.x) > eps;
+    const vertical = Math.abs(a.x - b.x) < eps && Math.abs(a.y - b.y) > eps;
+    if (!horizontal && !vertical) return null;
+    const nextHorizontal = Math.abs(b.y - c.y) < eps && Math.abs(b.x - c.x) > eps;
+    if (horizontal === nextHorizontal) return null;
+  }
+  const bnds = polygonBounds(points);
+  const width = bnds.maxX - bnds.minX;
+  const length = bnds.maxY - bnds.minY;
+  if (width < eps || length < eps) return null;
+  return { x: bnds.minX, y: bnds.minY, width, length };
+}
+
 /** Aire d'un polygone (formule du lacet), toujours positive. */
 export function polygonArea(points: Vec2[]): number {
   let s = 0;

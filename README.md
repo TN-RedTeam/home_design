@@ -73,8 +73,9 @@ et visualisez le résultat en 3D — avant d'acheter ou de repeindre quoi que ce
   **taille réelle du motif** (cm) — les carreaux/lames ne sont jamais étirés, quelle que soit la pièce
 - Rendu 3D temps réel : texture répétée à la bonne échelle, orientée selon le mur, avec les
   ouvertures qui restent percées (la texture n'habille ni les vitrages ni les vantaux)
+- **Rotation du motif** par surface, par pas de 90° (orienter les lames de parquet, les rayures…)
 - **Finition par surface** (sol et chaque mur) : Mat / Satiné / Brillant — ajuste le reflet
-  du matériau en 3D
+  du matériau en 3D, avec une environment map procédurale pour des reflets réalistes
 
 ### 🏠 Vue 3D temps réel
 - Sols polygonaux extrudés, murs à la vraie hauteur avec ouvertures percées (linteaux, allèges,

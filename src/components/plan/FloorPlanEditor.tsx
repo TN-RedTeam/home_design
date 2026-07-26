@@ -881,6 +881,7 @@ export default function FloorPlanEditor() {
     // Aperçu 2D de la texture de sol : motif épinglé au repère monde (suit pan/zoom).
     const texUrl = room.floorTexture ? textureUrl(room.floorTexture) : null;
     const tilePx = px((room.floorTileCm ?? DEFAULT_TILE_CM) / 100);
+    const floorRot = room.floorTextureRot ?? 0;
     const patternId = `floor-tex-${room.id}`;
     return (
       <g key={room.id} className={`room ${isSel ? 'selected' : ''}`}>
@@ -891,7 +892,7 @@ export default function FloorPlanEditor() {
               patternUnits="userSpaceOnUse"
               width={tilePx}
               height={tilePx}
-              patternTransform={`translate(${X(0)} ${Y(0)})`}
+              patternTransform={`translate(${X(0)} ${Y(0)}) rotate(${floorRot})`}
             >
               <image href={texUrl} width={tilePx} height={tilePx} preserveAspectRatio="none" />
             </pattern>
@@ -918,7 +919,7 @@ export default function FloorPlanEditor() {
           const textured = wTexUrl && wTilePx > 2 && !isSelWall;
           // Motif ancré au début du mur et pivoté selon son angle : le motif court
           // le long du mur, même en oblique (échelle constante via l'angle en screen).
-          const wallDeg = (Math.atan2(Y(b.y) - Y(a.y), X(b.x) - X(a.x)) * 180) / Math.PI;
+          const wallDeg = (Math.atan2(Y(b.y) - Y(a.y), X(b.x) - X(a.x)) * 180) / Math.PI + (wall?.textureRot ?? 0);
           return (
             <g key={i}>
               {textured && (

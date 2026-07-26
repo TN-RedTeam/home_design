@@ -46,6 +46,8 @@ type DragState =
   | { mode: 'furniture'; id: string; dx: number; dy: number }
   | { mode: 'rotate'; id: string; cx: number; cy: number }
   | { mode: 'opening'; roomId: string; id: string }
+  /** Redimensionnement d'un bord d'ouverture le long de son mur. */
+  | { mode: 'opening-edge'; roomId: string; id: string; edge: 'start' | 'end' }
   | { mode: 'roofWindow'; roomId: string; id: string; dx: number; dy: number }
   | { mode: 'draw'; x0: number; y0: number; x1: number; y1: number }
   | { mode: 'measure'; x0: number; y0: number; x1: number; y1: number }
@@ -86,6 +88,7 @@ export default function FloorPlanEditor() {
   const removeVertex = useStore((s) => s.removeVertex);
   const updateFurniture = useStore((s) => s.updateFurniture);
   const updateOpening = useStore((s) => s.updateOpening);
+  const resizeOpeningEdge = useStore((s) => s.resizeOpeningEdge);
   const updateRoofWindow = useStore((s) => s.updateRoofWindow);
   const activeFloorId = useStore((s) => s.activeFloorId);
   const setActiveFloor = useStore((s) => s.setActiveFloor);
@@ -376,6 +379,18 @@ export default function FloorPlanEditor() {
         updateOpening(d.roomId, d.id, { offset: clamp(snapTo(t - op.width / 2, snap), 0, max) });
         break;
       }
+      case 'opening-edge': {
+        const room = project.rooms.find((r) => r.id === d.roomId);
+        const op = room?.openings.find((o) => o.id === d.id);
+        if (!room || !op) break;
+        const { a, b } = wallEndpoints(room, op.wall);
+        const len = dist(a, b);
+        if (len < 1e-9) break;
+        // Position du curseur projetée sur le mur (m depuis le début), accrochée.
+        const along = clamp(snapTo(((w.x - a.x) * (b.x - a.x) + (w.y - a.y) * (b.y - a.y)) / len, snap), 0, len);
+        resizeOpeningEdge(d.roomId, d.id, d.edge, along);
+        break;
+      }
     }
   };
 
@@ -540,6 +555,35 @@ export default function FloorPlanEditor() {
           </>
         )}
         <rect x={cx - len / 2} y={cy - t} width={len} height={t * 2} fill="transparent" style={{ cursor: 'move' }} />
+        {isSel && (
+          <>
+            {/* Poignées de largeur aux deux bords ; le bord tiré s'arrête, l'autre reste ancré. */}
+            {(['start', 'end'] as const).map((edge) => {
+              const hx = edge === 'start' ? cx - len / 2 : cx + len / 2;
+              return (
+                <rect
+                  key={edge}
+                  x={hx - 4}
+                  y={cy - 5}
+                  width={8}
+                  height={10}
+                  className="opening-edge-handle"
+                  onPointerDown={(e) => {
+                    e.stopPropagation();
+                    svgRef.current!.setPointerCapture(e.pointerId);
+                    select({ kind: 'opening', roomId: room.id, id: o.id });
+                    setDrag({ mode: 'opening-edge', roomId: room.id, id: o.id, edge });
+                  }}
+                >
+                  <title>Glisser pour ajuster la largeur</title>
+                </rect>
+              );
+            })}
+            <text x={cx} y={cy - t - 5} className="opening-width-label" textAnchor="middle">
+              {formatLength(o.width)}
+            </text>
+          </>
+        )}
       </g>
     );
   };

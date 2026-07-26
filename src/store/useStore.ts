@@ -17,7 +17,7 @@ import type {
   ViewMode,
 } from '../types';
 import { uid } from '../types';
-import { clamp, dist, rectPoints, rectSize, wallLength } from '../utils/geometry';
+import { clamp, dist, edgeResizeOpening, fitOpening, rectPoints, rectSize, wallLength } from '../utils/geometry';
 
 const DEFAULT_WALL = '#f4f1ea';
 
@@ -330,6 +330,12 @@ interface AppState {
 
   addOpening: (roomId: ID, opening: Omit<Opening, 'id'>) => void;
   updateOpening: (roomId: ID, id: ID, patch: Partial<Opening>) => void;
+  /**
+   * Redimensionne une ouverture à la souris en tirant l'un de ses bords le
+   * long du mur : le bord opposé est ancré, le bord tiré s'arrête au mur ou à
+   * une voisine (la largeur rogne, pas de glissement). `along` en mètres.
+   */
+  resizeOpeningEdge: (roomId: ID, id: ID, edge: 'start' | 'end', along: number) => void;
   removeOpening: (roomId: ID, id: ID) => void;
 
   addRoofWindow: (roomId: ID, rw: Omit<RoofWindow, 'id'>) => void;
@@ -595,11 +601,33 @@ export const useStore = create<AppState>()(
         set({
           project: touch({
             ...get().project,
-            rooms: get().project.rooms.map((r) =>
-              r.id === roomId
-                ? { ...r, openings: r.openings.map((o) => (o.id === id ? { ...o, ...patch } : o)) }
-                : r
-            ),
+            rooms: get().project.rooms.map((r) => {
+              if (r.id !== roomId) return r;
+              return {
+                ...r,
+                openings: r.openings.map((o) => {
+                  if (o.id !== id) return o;
+                  const merged = { ...o, ...patch };
+                  // Clamp géométrique (largeur/mur, hauteur/plafond, chevauchement).
+                  return { ...merged, ...fitOpening(r, merged) };
+                }),
+              };
+            }),
+          }),
+        }),
+      resizeOpeningEdge: (roomId, id, edge, along) =>
+        set({
+          project: touch({
+            ...get().project,
+            rooms: get().project.rooms.map((r) => {
+              if (r.id !== roomId) return r;
+              return {
+                ...r,
+                openings: r.openings.map((o) =>
+                  o.id === id ? { ...o, ...edgeResizeOpening(r, o, edge, along) } : o
+                ),
+              };
+            }),
           }),
         }),
       removeOpening: (roomId, id) =>

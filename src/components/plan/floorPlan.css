@@ -48,6 +48,23 @@
   stroke-width: 1.5;
   stroke-dasharray: 6 4;
 }
+
+.opening-edge-handle {
+  fill: #f4f1ea;
+  stroke: #d4a373;
+  stroke-width: 2;
+  rx: 1.5;
+  cursor: ew-resize;
+}
+.opening-edge-handle:hover { fill: #d4a373; }
+.opening-width-label {
+  fill: #d4a373;
+  font-size: 11px;
+  font-weight: 700;
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.6);
+  stroke-width: 3px;
+}
 .room-wall-open {
   stroke: #6d7688;
   stroke-dasharray: 7 5;

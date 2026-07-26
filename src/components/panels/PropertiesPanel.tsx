@@ -350,19 +350,22 @@ function OpeningProps({ roomId, openingId }: { roomId: string; openingId: string
             }}
           />
         </label>
-        {o.type === 'fenetre' && (
+        {(o.type === 'fenetre' || o.type === 'double_fenetre') && (
           <CmField label="Allège (cm)" value={o.sillHeight} min={0} onChange={(v) => updateOpening(roomId, o.id, { sillHeight: v })} />
         )}
       </div>
+      <p className="hint">
+        Sur le plan, glissez les poignées carrées aux bords pour ajuster la largeur (elle bute sur le mur
+        et les ouvertures voisines).
+      </p>
       {(o.type === 'porte' || o.type === 'porte_entree' || o.type === 'porte_fenetre') && (
-        <label className="check-row">
-          <input
-            type="checkbox"
-            checked={o.flip ?? false}
-            onChange={(e) => updateOpening(roomId, o.id, { flip: e.target.checked })}
-          />
-          Sens d'ouverture inversé (R)
-        </label>
+        <button
+          className={`btn btn-block ${o.flip ? 'btn-accent' : ''}`}
+          onClick={() => updateOpening(roomId, o.id, { flip: !o.flip })}
+          title="Inverse le battant (même effet que R pendant la pose)"
+        >
+          ⟲ Inverser le sens d'ouverture{o.flip ? ' ✓' : ''}
+        </button>
       )}
       <button className="btn btn-block" onClick={() => select({ kind: 'room', id: roomId })}>← Retour à la pièce</button>
       <button className="btn btn-danger btn-block" onClick={() => removeOpening(roomId, o.id)}>Supprimer</button>

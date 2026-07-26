@@ -904,27 +904,48 @@ export default function FloorPlanEditor() {
           onPointerDown={(e) => startRoomDrag(e, room)}
         />
         {/* Murs : trait épais si fermé, pointillé fin si ouvert. Chaque section est
-            sélectionnable (Suppr = supprimer la section, panneau = peinture). */}
+            sélectionnable (Suppr = supprimer la section, panneau = peinture).
+            Une section texturée voit son trait rempli par le motif (épinglé au
+            repère monde, suit pan/zoom) — aperçu type plan CAO. */}
         {room.points.map((a, i) => {
           const b = room.points[(i + 1) % room.points.length];
-          const open = room.walls[i]?.open;
+          const wall = room.walls[i];
+          const open = wall?.open;
           const isSelWall = selection?.kind === 'wall' && selection.roomId === room.id && selection.index === i;
+          const wTexUrl = !open && wall?.texture ? textureUrl(wall.texture) : null;
+          const wTilePx = px((wall?.tileCm ?? DEFAULT_TILE_CM) / 100);
+          const wPatternId = `wall-tex-${room.id}-${i}`;
+          const textured = wTexUrl && wTilePx > 2 && !isSelWall;
           return (
-            <line
-              key={i}
-              x1={X(a.x)}
-              y1={Y(a.y)}
-              x2={X(b.x)}
-              y2={Y(b.y)}
-              className={`${open ? 'room-wall-open' : 'room-wall'} ${isSelWall ? 'wall-selected' : ''}`}
-              strokeWidth={Math.max(open ? 4 : px(WALL_T), 6)}
-              style={{ cursor: openingPlacement ? 'copy' : 'pointer' }}
-              onPointerDown={(e) => {
-                if (openingPlacement || placement || tool !== 'select' || e.button !== 0) return;
-                e.stopPropagation();
-                select({ kind: 'wall', roomId: room.id, index: i });
-              }}
-            />
+            <g key={i}>
+              {textured && (
+                <defs>
+                  <pattern
+                    id={wPatternId}
+                    patternUnits="userSpaceOnUse"
+                    width={wTilePx}
+                    height={wTilePx}
+                    patternTransform={`translate(${X(0)} ${Y(0)})`}
+                  >
+                    <image href={wTexUrl} width={wTilePx} height={wTilePx} preserveAspectRatio="none" />
+                  </pattern>
+                </defs>
+              )}
+              <line
+                x1={X(a.x)}
+                y1={Y(a.y)}
+                x2={X(b.x)}
+                y2={Y(b.y)}
+                className={`${open ? 'room-wall-open' : 'room-wall'} ${isSelWall ? 'wall-selected' : ''}`}
+                strokeWidth={Math.max(open ? 4 : px(WALL_T), 6)}
+                style={{ cursor: openingPlacement ? 'copy' : 'pointer', ...(textured ? { stroke: `url(#${wPatternId})` } : null) }}
+                onPointerDown={(e) => {
+                  if (openingPlacement || placement || tool !== 'select' || e.button !== 0) return;
+                  e.stopPropagation();
+                  select({ kind: 'wall', roomId: room.id, index: i });
+                }}
+              />
+            </g>
           );
         })}
         {room.openings.map((o) => renderOpening(room, o))}

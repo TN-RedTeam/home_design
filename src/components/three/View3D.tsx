@@ -51,6 +51,27 @@ function wallSegments(room: Room, wall: number, len: number): WallSeg[] {
 /** Hauteur des murs en mode « muret » (comme les murs abaissés des Sims). */
 const LOW_WALL_H = 1.0;
 
+/**
+ * Géométrie d'un segment de mur (boîte) dont les UV des deux grandes faces
+ * (avant/arrière) sont exprimées en MÈTRES et alignées sur la position du
+ * segment le long du mur : `from..from+segLen` horizontalement, `bottom..
+ * bottom+h` verticalement. Combinée à une texture repeat=1/tile, le motif se
+ * répète à la taille réelle, suit l'orientation du mur (pas couché) et
+ * raccorde d'un segment à l'autre (trumeaux/linteaux/allèges alignés).
+ */
+function wallSegmentGeometry(segLen: number, h: number, from: number, bottom: number): THREE.BoxGeometry {
+  const geo = new THREE.BoxGeometry(segLen, h, WALL_T);
+  const uv = geo.attributes.uv;
+  // Faces +Z (indices 16..19) et -Z (20..23) : les deux grandes faces du mur.
+  for (let i = 16; i < 24; i++) {
+    const u0 = uv.getX(i); // 0 ou 1
+    const v0 = uv.getY(i);
+    uv.setXY(i, from + u0 * segLen, bottom + v0 * h);
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+
 function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode }) {
   const select = useStore((s) => s.select);
   const isSelected = useStore(
@@ -60,19 +81,32 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
   const len = Math.hypot(b.x - a.x, b.y - a.y);
   const allSegs = useMemo(() => wallSegments(room, wall, len), [room, wall, len]);
   const color = room.walls[wall]?.color ?? '#f4f1ea';
+  // Texture de mur (optionnelle), partagée entre tous les segments, à l'échelle réelle.
+  const wallTex = useSurfaceTexture(room.walls[wall]?.texture, (room.walls[wall]?.tileCm ?? DEFAULT_TILE_CM) / 100);
 
   // Matériau partagé par tous les segments du mur : un seul fondu à piloter.
   const mat = useMemo(
     () =>
       new THREE.MeshStandardMaterial({
-        color,
+        color: wallTex ? '#ffffff' : color,
+        map: wallTex ?? null,
         roughness: 0.92,
         transparent: true,
         emissive: isSelected ? '#d4a373' : '#000000',
         emissiveIntensity: isSelected ? 0.3 : 0,
       }),
-    [color, isSelected]
+    [color, isSelected, wallTex]
   );
+
+  // Géométries des segments avec UV en mètres (mémoïsées), disposées au changement.
+  const segList = useMemo(() => {
+    const base =
+      mode === 'down'
+        ? allSegs.filter((s) => s.bottom < LOW_WALL_H).map((s) => ({ ...s, top: Math.min(s.top, LOW_WALL_H) }))
+        : allSegs;
+    return base.map((seg) => ({ seg, geo: wallSegmentGeometry(seg.to - seg.from, seg.top - seg.bottom, seg.from, seg.bottom) }));
+  }, [allSegs, mode]);
+  useEffect(() => () => segList.forEach(({ geo }) => geo.dispose()), [segList]);
   const anchorRef = useRef<THREE.Group>(null);
   const extrasRef = useRef<THREE.Group>(null);
   const worldPos = useMemo(() => new THREE.Vector3(), []);
@@ -99,25 +133,18 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
   const angle = Math.atan2(b.y - a.y, b.x - a.x);
 
   const at = (t: number): [number, number] => [a.x + ux * t, a.y + uy * t];
-  // Mode « muret » : les murs sont tronqués à hauteur de coude.
-  const segs =
-    mode === 'down'
-      ? allSegs
-          .filter((s) => s.bottom < LOW_WALL_H)
-          .map((s) => ({ ...s, top: Math.min(s.top, LOW_WALL_H) }))
-      : allSegs;
   const [ax, az] = at(len / 2);
 
   return (
     <>
       <group ref={anchorRef} position={[ax, room.height / 2, az]} />
-      {segs.map((seg, i) => {
-        const segLen = seg.to - seg.from;
+      {segList.map(({ seg, geo }, i) => {
         const h = seg.top - seg.bottom;
         const [mx, mz] = at((seg.from + seg.to) / 2);
         return (
           <mesh
             key={i}
+            geometry={geo}
             position={[mx, seg.bottom + h / 2, mz]}
             rotation={[0, -angle, 0]}
             castShadow
@@ -127,9 +154,7 @@ function Wall({ room, wall, mode }: { room: Room; wall: number; mode: WallsMode 
               e.stopPropagation();
               select({ kind: 'wall', roomId: room.id, index: wall });
             }}
-          >
-            <boxGeometry args={[segLen, h, WALL_T]} />
-          </mesh>
+          />
         );
       })}
       {/* Vitrages, meneaux et vantaux dans les ouvertures (masqués quand le mur s'efface) */}

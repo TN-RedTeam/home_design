@@ -326,6 +326,15 @@ function RoomProps({ room }: { room: Room }) {
             value={currentWall?.color ?? '#f4f1ea'}
             onChange={(hex) => updateWall(room.id, safeWall, { color: hex })}
           />
+          <TexturePicker
+            surface="wall"
+            texture={currentWall?.texture}
+            tileCm={currentWall?.tileCm ?? DEFAULT_TILE_CM}
+            onPick={(ref) => updateWall(room.id, safeWall, { texture: ref })}
+            onImport={(dataUrl, name) => updateWall(room.id, safeWall, { texture: { kind: 'custom', dataUrl, name }, tileCm: currentWall?.tileCm ?? DEFAULT_TILE_CM })}
+            onClear={() => updateWall(room.id, safeWall, { texture: undefined })}
+            onTile={(cm) => updateWall(room.id, safeWall, { tileCm: cm })}
+          />
           <button
             className="btn btn-block"
             onClick={() =>
@@ -431,6 +440,16 @@ function WallProps({ roomId, index }: { roomId: string; index: number }) {
         <>
           <h3>Peinture</h3>
           <PaintPicker value={wall.color} onChange={(hex) => updateWall(roomId, index, { color: hex })} />
+          <h3>Texture</h3>
+          <TexturePicker
+            surface="wall"
+            texture={wall.texture}
+            tileCm={wall.tileCm ?? DEFAULT_TILE_CM}
+            onPick={(ref) => updateWall(roomId, index, { texture: ref })}
+            onImport={(dataUrl, name) => updateWall(roomId, index, { texture: { kind: 'custom', dataUrl, name }, tileCm: wall.tileCm ?? DEFAULT_TILE_CM })}
+            onClear={() => updateWall(roomId, index, { texture: undefined })}
+            onTile={(cm) => updateWall(roomId, index, { tileCm: cm })}
+          />
           <button className="btn btn-danger btn-block" onClick={() => { updateWall(roomId, index, { open: true }); }}>
             🗑 Supprimer cette section (mur ouvert)
           </button>

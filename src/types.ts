@@ -80,6 +80,10 @@ export interface Opening {
 export interface RoomWall {
   color: string;
   open: boolean;
+  /** Texture image du mur (optionnelle) ; sans elle, rendu couleur unie. */
+  texture?: TextureRef;
+  /** Taille réelle du motif de la texture de mur en cm (répétition). */
+  tileCm?: number;
 }
 
 /** Fenêtre de toit (Velux) posée sur le plafond d'une pièce. (x, y) = centre, repère du plan. */

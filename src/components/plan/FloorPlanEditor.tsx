@@ -916,6 +916,9 @@ export default function FloorPlanEditor() {
           const wTilePx = px((wall?.tileCm ?? DEFAULT_TILE_CM) / 100);
           const wPatternId = `wall-tex-${room.id}-${i}`;
           const textured = wTexUrl && wTilePx > 2 && !isSelWall;
+          // Motif ancré au début du mur et pivoté selon son angle : le motif court
+          // le long du mur, même en oblique (échelle constante via l'angle en screen).
+          const wallDeg = (Math.atan2(Y(b.y) - Y(a.y), X(b.x) - X(a.x)) * 180) / Math.PI;
           return (
             <g key={i}>
               {textured && (
@@ -925,7 +928,7 @@ export default function FloorPlanEditor() {
                     patternUnits="userSpaceOnUse"
                     width={wTilePx}
                     height={wTilePx}
-                    patternTransform={`translate(${X(0)} ${Y(0)})`}
+                    patternTransform={`translate(${X(a.x)} ${Y(a.y)}) rotate(${wallDeg})`}
                   >
                     <image href={wTexUrl} width={wTilePx} height={wTilePx} preserveAspectRatio="none" />
                   </pattern>

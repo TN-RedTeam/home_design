@@ -6,6 +6,7 @@ import { useStore } from '../../store/useStore';
 import type { FloorMaterial, OpeningType, Room, RoomType, TextureRef } from '../../types';
 import {
   DEFAULT_TILE_CM,
+  FINISH_LABELS,
   FLOOR_LABELS,
   OPENING_DEFAULTS,
   OPENING_LABELS,
@@ -14,6 +15,7 @@ import {
   formatArea,
   formatLength,
 } from '../../types';
+import type { Finish } from '../../types';
 import { polygonCentroid } from '../../utils/geometry';
 import { polygonArea, rectSize, wallLength, withEdgeLength } from '../../utils/geometry';
 
@@ -38,6 +40,23 @@ function readTextureFile(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+/** Sélecteur de finition mat/satiné/brillant (segmented). `value` undefined = Mat par défaut. */
+function FinishButtons({ value, onChange }: { value: Finish | undefined; onChange: (f: Finish) => void }) {
+  const current = value ?? 'mat';
+  return (
+    <label>
+      Finition
+      <div className="finish-buttons">
+        {(Object.keys(FINISH_LABELS) as Finish[]).map((f) => (
+          <button key={f} className={`btn btn-sm ${current === f ? 'btn-accent' : ''}`} onClick={() => onChange(f)}>
+            {FINISH_LABELS[f]}
+          </button>
+        ))}
+      </div>
+    </label>
+  );
 }
 
 /**
@@ -276,6 +295,7 @@ function RoomProps({ room }: { room: Room }) {
         onClear={() => updateRoom(room.id, { floorTexture: undefined })}
         onTile={(cm) => updateRoom(room.id, { floorTileCm: cm })}
       />
+      <FinishButtons value={room.floorFinish} onChange={(f) => updateRoom(room.id, { floorFinish: f })} />
 
       <h3>Murs</h3>
       <div className="wall-tabs wall-tabs-wrap">
@@ -335,6 +355,7 @@ function RoomProps({ room }: { room: Room }) {
             onClear={() => updateWall(room.id, safeWall, { texture: undefined })}
             onTile={(cm) => updateWall(room.id, safeWall, { tileCm: cm })}
           />
+          <FinishButtons value={currentWall?.finish} onChange={(f) => updateWall(room.id, safeWall, { finish: f })} />
           <button
             className="btn btn-block"
             onClick={() =>
@@ -450,6 +471,7 @@ function WallProps({ roomId, index }: { roomId: string; index: number }) {
             onClear={() => updateWall(roomId, index, { texture: undefined })}
             onTile={(cm) => updateWall(roomId, index, { tileCm: cm })}
           />
+          <FinishButtons value={wall.finish} onChange={(f) => updateWall(roomId, index, { finish: f })} />
           <button className="btn btn-danger btn-block" onClick={() => { updateWall(roomId, index, { open: true }); }}>
             🗑 Supprimer cette section (mur ouvert)
           </button>

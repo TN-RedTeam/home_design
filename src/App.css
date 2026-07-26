@@ -450,6 +450,9 @@
 .texture-swatch:hover { border-color: rgba(255, 255, 255, 0.5); }
 .texture-swatch.active { border-color: #d4a373; box-shadow: 0 0 0 2px rgba(212, 163, 115, 0.4); }
 
+.finish-buttons { display: flex; gap: 4px; }
+.finish-buttons .btn { flex: 1; }
+
 .wall-tabs { display: flex; gap: 4px; }
 .wall-tabs button {
   flex: 1;

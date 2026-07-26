@@ -84,6 +84,8 @@ export interface RoomWall {
   texture?: TextureRef;
   /** Taille réelle du motif de la texture de mur en cm (répétition). */
   tileCm?: number;
+  /** Finition du mur (mat/satiné/brillant) ; défaut = rendu actuel. */
+  finish?: Finish;
 }
 
 /** Fenêtre de toit (Velux) posée sur le plafond d'une pièce. (x, y) = centre, repère du plan. */
@@ -141,6 +143,26 @@ export type TextureRef =
 /** Taille de motif par défaut (cm) quand une texture est appliquée. */
 export const DEFAULT_TILE_CM = 60;
 
+/** Finition d'une surface : mate (peu de reflet), satinée, ou brillante. */
+export type Finish = 'mat' | 'satine' | 'brillant';
+
+export const FINISH_LABELS: Record<Finish, string> = {
+  mat: 'Mat',
+  satine: 'Satiné',
+  brillant: 'Brillant',
+};
+
+/** Rugosité du matériau (meshStandardMaterial) par finition ; plus bas = plus brillant. */
+export const FINISH_ROUGHNESS: Record<Finish, number> = {
+  mat: 0.95,
+  satine: 0.5,
+  brillant: 0.15,
+};
+
+/** Rugosité par défaut si aucune finition explicite (rendu d'aujourd'hui). */
+export const DEFAULT_FLOOR_ROUGHNESS = 0.85;
+export const DEFAULT_WALL_ROUGHNESS = 0.92;
+
 /** Niveau de la maison (rez-de-chaussée, étage 1…). */
 export interface Floor {
   id: ID;
@@ -172,6 +194,8 @@ export interface Room {
   floorTexture?: TextureRef;
   /** Taille réelle du motif de la texture de sol en cm (répétition). */
   floorTileCm?: number;
+  /** Finition du sol (mat/satiné/brillant) ; défaut = rendu actuel. */
+  floorFinish?: Finish;
   openings: Opening[];
   /** Fenêtres de toit (Velux). */
   roofWindows: RoofWindow[];
